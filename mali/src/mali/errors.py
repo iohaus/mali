@@ -39,3 +39,7 @@ class CurriculumTooLarge(MaliDomainError):
 
 class InvalidProgress(MaliDomainError):
     """Raised when a progress mask is not valid for its curriculum."""
+
+
+class InvalidTemplate(MaliDomainError):
+    """Raised when a question template is not safe to use."""
