@@ -83,12 +83,18 @@ def test_core_does_not_import_boundary_modules() -> None:
     assert not violations, "boundary imports: " + ", ".join(violations)
 
 
+def _is_third_party_path(path: Path) -> bool:
+    # ignore virtualenvs, site-packages and common build dirs inside the repo
+    forbidden = {"site-packages", ".venv", "venv", "env", ".env", ".tox", ".eggs"}
+    return any(part in forbidden or part.startswith(".") and part != "." for part in path.parts)
+
 def test_repository_does_not_suppress_type_errors() -> None:
     suppression = "type" + ": ignore"
     matches = [
         path
         for path in REPOSITORY_ROOT.rglob("*.py")
         if suppression in path.read_text(encoding="utf-8")
+        and not _is_third_party_path(path)
     ]
     assert not matches, "type suppressions: " + ", ".join(map(str, matches))
 
