@@ -123,6 +123,24 @@ _MIGRATIONS: tuple[tuple[str, ...], ...] = (
         """,
     ),
     ("ALTER TABLE checkpoint RENAME COLUMN placement_data TO estimate",),
+    (
+        """
+        ALTER TABLE teaching_trace
+        ADD COLUMN episode_id TEXT NOT NULL DEFAULT ''
+        """,
+        """
+        ALTER TABLE teaching_trace
+        ADD COLUMN prompt_version TEXT NOT NULL DEFAULT ''
+        """,
+        """
+        ALTER TABLE teaching_trace
+        ADD COLUMN policy_version TEXT NOT NULL DEFAULT ''
+        """,
+        """
+        ALTER TABLE teaching_trace
+        ADD COLUMN episode_outcome TEXT NOT NULL DEFAULT 'completed'
+        """,
+    ),
 )
 
 

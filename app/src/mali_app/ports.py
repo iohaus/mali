@@ -3,10 +3,11 @@
 from typing import Protocol
 
 from mali.actions import Action, Actor
-from mali.ids import LearnerId
+from mali.ids import LearnerId, SkillCode
 from mali.snapshot import Snapshot
+from mali.views import ClosedMistake
 
-from mali_app.store_types import AuditResult, ExecutionResult
+from mali_app.store_types import AuditResult, ExecutionResult, TeachingTrace
 
 
 class RecordStore(Protocol):
@@ -24,3 +25,9 @@ class RecordStore(Protocol):
     ) -> ExecutionResult: ...
 
     def audit(self, learner: LearnerId) -> AuditResult: ...
+
+    def recent_mistakes(
+        self, learner: LearnerId, skill: SkillCode, limit: int
+    ) -> tuple[ClosedMistake, ...]: ...
+
+    def record_teaching_trace(self, trace: TeachingTrace) -> None: ...

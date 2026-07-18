@@ -6,6 +6,7 @@ from dataclasses import fields
 from fractions import Fraction
 from hashlib import sha256
 from typing import cast
+from uuid import uuid4
 
 from mali.actions import (
     Action,
@@ -43,11 +44,17 @@ from mali.templates import (
     QuestionInstance,
     QuestionTemplate,
 )
+from mali.views import ClosedMistake
 
 from mali_app.clock import Clock, SystemClock, as_storage_time
 from mali_app.fresh import FreshSource, SystemFreshSource
 from mali_app.schema import DatabasePath, open_database
-from mali_app.store_types import AuditResult, ExecutionResult, ExecutionStatus
+from mali_app.store_types import (
+    AuditResult,
+    ExecutionResult,
+    ExecutionStatus,
+    TeachingTrace,
+)
 
 _MAX_EXECUTION_ATTEMPTS = 2
 _CURRICULUM_TITLE = "Mali curriculum"
@@ -223,6 +230,79 @@ class SQLiteRecordStore:
         if _same_progress(replayed, live.progress):
             return AuditResult(True, "journal agrees with current progress")
         return AuditResult(False, "journal does not agree with current progress")
+
+    def recent_mistakes(
+        self, learner: LearnerId, skill: SkillCode, limit: int
+    ) -> tuple[ClosedMistake, ...]:
+        """Load only closed-check incorrect answers for one skill's teaching context."""
+        if type(limit) is not int or limit < 1:
+            raise ValueError("recent mistake limit must be a positive integer")
+        connection = self._connection()
+        try:
+            rows = connection.execute(
+                """
+                SELECT q.params, q.answer_key, a.given
+                FROM question AS q
+                JOIN checkpoint AS c ON c.id = q.checkpoint_id
+                JOIN answer AS a ON a.question_id = q.id
+                WHERE c.learner = ?
+                  AND c.status <> 'open'
+                  AND q.skill = ?
+                  AND a.is_correct = 0
+                ORDER BY a.answered_at DESC, q.id DESC
+                LIMIT ?
+                """,
+                (learner, skill, limit),
+            ).fetchall()
+            mistakes = tuple(
+                ClosedMistake(
+                    skill,
+                    _text(_mapping(_decoded(_text(row["params"])))["text"]),
+                    _text(row["given"]),
+                    _text(row["answer_key"]),
+                )
+                for row in rows
+            )
+            return tuple(reversed(mistakes))
+        except sqlite3.DatabaseError as error:
+            raise StoreError("could not load recent mistakes") from error
+        finally:
+            connection.close()
+
+    def record_teaching_trace(self, trace: TeachingTrace) -> None:
+        """Persist one completed teaching turn without changing learner progress."""
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                INSERT INTO teaching_trace
+                    (id, learner, skill, episode_id, model, prompt_version,
+                     policy_version, transcript, tokens_in, tokens_out,
+                     episode_outcome, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"trace-{uuid4().hex}",
+                    trace.learner,
+                    trace.skill,
+                    trace.episode_id,
+                    trace.model,
+                    trace.prompt_version,
+                    trace.policy_version,
+                    trace.transcript,
+                    trace.tokens_in,
+                    trace.tokens_out,
+                    trace.episode_outcome,
+                    self._now(),
+                ),
+            )
+            connection.execute("COMMIT")
+        except sqlite3.DatabaseError as error:
+            self._rollback(connection)
+            raise StoreError("could not save teaching trace") from error
+        finally:
+            connection.close()
 
     def _install_configuration(self) -> None:
         connection = self._connection()

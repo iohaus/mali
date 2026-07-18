@@ -7,7 +7,13 @@ from mali.templates import QuestionInstance, QuestionTemplate, validate_renderin
 from mali.views import item_writer_context
 from pydantic import BaseModel, ConfigDict
 
-from mali_app.model_gateway import GatewayError, ModelGateway, StructuredRequest
+from mali_app.model_gateway import (
+    GatewayError,
+    GatewayTimeout,
+    GatewayUnavailable,
+    ModelGateway,
+    StructuredRequest,
+)
 from mali_app.prompt_assets import item_writer_prompt, render_item_writer_context
 
 
@@ -34,6 +40,7 @@ class ItemWriterResult:
     question_text: str
     attempts: int
     used_fallback: bool
+    gateway_failed: bool
     rejection_reasons: tuple[str, ...]
 
 
@@ -53,6 +60,7 @@ class ItemWriter:
         instructions = item_writer_prompt(policy).instructions
         input_text = render_item_writer_context(item_writer_context(template, instance))
         rejection_reasons: list[str] = []
+        gateway_failed = False
         for attempt in range(1, policy.flow_budget.item_writer_retries + 2):
             request = StructuredRequest(
                 instructions,
@@ -65,6 +73,9 @@ class ItemWriter:
                 _accept_rendering(instance, response.question_text)
             except GatewayError as error:
                 reason = type(error).__name__
+                gateway_failed = gateway_failed or isinstance(
+                    error, (GatewayTimeout, GatewayUnavailable)
+                )
             except RenderingRejected as error:
                 reason = error.reason
             else:
@@ -72,6 +83,7 @@ class ItemWriter:
                     response.question_text,
                     attempt,
                     False,
+                    gateway_failed,
                     tuple(rejection_reasons),
                 )
             rejection_reasons.append(reason)
@@ -80,6 +92,7 @@ class ItemWriter:
             instance.text,
             policy.flow_budget.item_writer_retries + 1,
             True,
+            gateway_failed,
             tuple(rejection_reasons),
         )
 

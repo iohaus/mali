@@ -26,7 +26,7 @@ def test_open_database_enables_wal_and_creates_the_record_schema() -> None:
             "learning_journal",
             "teaching_trace",
         } <= tables
-        assert version == (2,)
+        assert version == (3,)
     finally:
         connection.close()
 
@@ -36,7 +36,7 @@ def test_migrations_are_idempotent() -> None:
     try:
         apply_migrations(connection)
         apply_migrations(connection)
-        assert connection.execute("PRAGMA user_version").fetchone() == (2,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (3,)
     finally:
         connection.close()
 
@@ -45,6 +45,20 @@ def test_migration_renames_the_checkpoint_archive_column() -> None:
     connection = sqlite3.connect(":memory:")
     try:
         connection.execute("CREATE TABLE checkpoint (placement_data TEXT)")
+        connection.execute(
+            """
+            CREATE TABLE teaching_trace (
+                id TEXT PRIMARY KEY,
+                learner TEXT NOT NULL,
+                skill TEXT NOT NULL,
+                model TEXT NOT NULL,
+                transcript TEXT NOT NULL,
+                tokens_in INTEGER NOT NULL,
+                tokens_out INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
         connection.execute("PRAGMA user_version = 1")
 
         apply_migrations(connection)

@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
+from mali.ids import SkillCode
 from mali.plans import ActionPlan
 from mali.rules import RefusalReason
 from mali.snapshot import Snapshot
@@ -46,3 +47,19 @@ class AuditResult:
 
     valid: bool
     detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class TeachingTrace:
+    """One completed, replay-excluded teaching turn retained for audit."""
+
+    learner: str
+    skill: SkillCode
+    episode_id: str
+    model: str
+    prompt_version: str
+    policy_version: str
+    transcript: str
+    tokens_in: int
+    tokens_out: int
+    episode_outcome: str

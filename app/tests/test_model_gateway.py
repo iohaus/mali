@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from mali_app.model_gateway import (
     FixtureMissing,
     FixtureModelGateway,
+    FunctionTool,
     GatewayConfigurationError,
     GatewaySchemaViolation,
     GatewayTimeout,
@@ -104,6 +105,53 @@ def test_live_gateway_uses_responses_streaming_and_structured_parsing(
     assert responses.create_calls[0]["store"] is False
     assert responses.create_calls[0]["model"] == "gpt-5.6"
     assert responses.parse_calls[0]["text_format"] is WrittenItem
+
+
+def test_live_gateway_exposes_strict_tools_and_maps_function_calls() -> None:
+    tool = FunctionTool(
+        "get_progress_summary",
+        "Read the current learning summary.",
+        {"type": "object", "properties": {}, "additionalProperties": False},
+    )
+    responses = FakeResponses(
+        stream_results=[
+            iter(
+                (
+                    SimpleNamespace(
+                        type="response.output_item.done",
+                        item=SimpleNamespace(
+                            type="function_call",
+                            name="get_progress_summary",
+                            arguments="{}",
+                            call_id="call-1",
+                        ),
+                    ),
+                )
+            )
+        ]
+    )
+    gateway = OpenAIModelGateway(client=FakeClient(responses), retry_attempts=1)
+
+    events = tuple(
+        gateway.stream(StreamRequest("Teach clearly.", "Help.", 50, (tool,)))
+    )
+
+    assert events == (
+        StreamDelta(
+            tool_name="get_progress_summary",
+            tool_arguments="{}",
+            tool_call_id="call-1",
+        ),
+    )
+    assert responses.create_calls[0]["tools"] == [
+        {
+            "type": "function",
+            "name": "get_progress_summary",
+            "description": "Read the current learning summary.",
+            "parameters": tool.parameters,
+            "strict": True,
+        }
+    ]
 
 
 def test_live_gateway_requires_an_environment_credential(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
@@ -47,9 +48,30 @@ class StreamRequest:
     instructions: str
     input: str
     max_output_tokens: int
+    tools: tuple[FunctionTool, ...] = ()
 
     def __post_init__(self) -> None:
         _validate_request(self.instructions, self.input, self.max_output_tokens)
+        names = tuple(tool.name for tool in self.tools)
+        if len(set(names)) != len(names):
+            raise ValueError("model tool names must be unique")
+
+
+@dataclass(frozen=True, slots=True)
+class FunctionTool:
+    """One JSON-schema function exposed to a streamed model turn."""
+
+    name: str
+    description: str
+    parameters: dict[str, object]
+
+    def __post_init__(self) -> None:
+        if not self.name.isidentifier():
+            raise ValueError("model tool names must be valid identifiers")
+        if not self.description.strip():
+            raise ValueError("model tool descriptions must not be blank")
+        if self.parameters.get("type") != "object":
+            raise ValueError("model tool parameters must be an object schema")
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,9 +89,19 @@ class StructuredRequest[ResultT: BaseModel]:
 
 @dataclass(frozen=True, slots=True)
 class StreamDelta:
-    """One visible text fragment from a streamed model result."""
+    """One text fragment or function-call event from a streamed model result."""
 
-    text: str
+    text: str = ""
+    tool_name: str | None = None
+    tool_arguments: str | None = None
+    tool_call_id: str | None = None
+
+    def __post_init__(self) -> None:
+        is_tool_call = self.tool_name is not None
+        if is_tool_call != (self.tool_arguments is not None):
+            raise ValueError("a model tool call needs both name and arguments")
+        if self.text and is_tool_call:
+            raise ValueError("a stream event cannot be text and a tool call")
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +109,7 @@ class RecordedFixture:
     """A request fingerprint and its deterministic offline result."""
 
     fingerprint: str
-    stream: tuple[str, ...] | None = None
+    stream: tuple[StreamDelta, ...] | None = None
     structured: dict[str, object] | None = None
 
     def __post_init__(self) -> None:
@@ -122,19 +154,22 @@ class OpenAIModelGateway:
         emitted = False
         for attempt in range(self._retry_attempts):
             try:
-                response = self._client.responses.create(
-                    model=self._model,
-                    instructions=request.instructions,
-                    input=request.input,
-                    max_output_tokens=request.max_output_tokens,
-                    store=False,
-                    stream=True,
-                )
+                payload: dict[str, object] = {
+                    "model": self._model,
+                    "instructions": request.instructions,
+                    "input": request.input,
+                    "max_output_tokens": request.max_output_tokens,
+                    "store": False,
+                    "stream": True,
+                }
+                if request.tools:
+                    payload["tools"] = [_tool_payload(tool) for tool in request.tools]
+                response = self._client.responses.create(**payload)
                 for event in _as_iterator(response):
-                    text = _stream_text(event)
-                    if text is not None:
+                    delta = _stream_delta(event)
+                    if delta is not None:
                         emitted = True
-                        yield StreamDelta(text)
+                        yield delta
                 return
             except Exception as error:
                 gateway_error = _gateway_error(error)
@@ -181,11 +216,11 @@ class FixtureModelGateway:
         self._fixtures = {fixture.fingerprint: fixture for fixture in fixtures}
 
     def stream(self, request: StreamRequest) -> Iterator[StreamDelta]:
-        """Yield the recorded text fragments for a matching stream request."""
+        """Yield recorded text and function-call events for a matching request."""
         fixture = self._fixture_for(_stream_fingerprint(request))
         if fixture.stream is None:
             raise FixtureMissing("fixture has a structured result, not a stream")
-        return (StreamDelta(text) for text in fixture.stream)
+        return iter(fixture.stream)
 
     def structured[ResultT: BaseModel](
         self, request: StructuredRequest[ResultT]
@@ -221,12 +256,12 @@ class RecordingModelGateway:
         return tuple(self._fixtures)
 
     def stream(self, request: StreamRequest) -> Iterator[StreamDelta]:
-        """Forward a stream and record its complete visible text fragments."""
-        fragments = tuple(delta.text for delta in self._gateway.stream(request))
+        """Forward a stream and record all of its typed result events."""
+        events = tuple(self._gateway.stream(request))
         self._fixtures.append(
-            RecordedFixture(_stream_fingerprint(request), stream=fragments)
+            RecordedFixture(_stream_fingerprint(request), stream=events)
         )
-        return (StreamDelta(text) for text in fragments)
+        return iter(events)
 
     def structured[ResultT: BaseModel](
         self, request: StructuredRequest[ResultT]
@@ -284,16 +319,30 @@ def _as_iterator(value: object) -> Iterator[object]:
         raise GatewayUnavailable("model service did not return a stream") from error
 
 
-def _stream_text(event: object) -> str | None:
+def _stream_delta(event: object) -> StreamDelta | None:
     event_type = _attribute(event, "type")
     if event_type in {"error", "response.failed", "response.incomplete"}:
         raise GatewayUnavailable("model stream ended before a completed response")
+    if event_type == "response.output_item.done":
+        item = _attribute(event, "item")
+        if _attribute(item, "type") != "function_call":
+            return None
+        name = _attribute(item, "name")
+        arguments = _attribute(item, "arguments")
+        call_id = _attribute(item, "call_id")
+        if not isinstance(name, str) or not isinstance(arguments, str):
+            raise GatewayUnavailable("model function call was unreadable")
+        return StreamDelta(
+            tool_name=name,
+            tool_arguments=arguments,
+            tool_call_id=call_id if isinstance(call_id, str) else None,
+        )
     if event_type != "response.output_text.delta":
         return None
     delta = _attribute(event, "delta")
     if not isinstance(delta, str):
         raise GatewayUnavailable("model stream contained an unreadable text fragment")
-    return delta
+    return StreamDelta(delta)
 
 
 def _attribute(value: object, name: str) -> object:
@@ -323,7 +372,11 @@ def _gateway_error(error: Exception) -> GatewayError:
 
 def _stream_fingerprint(request: StreamRequest) -> str:
     return _fingerprint(
-        "stream", request.instructions, request.input, str(request.max_output_tokens)
+        "stream",
+        request.instructions,
+        request.input,
+        str(request.max_output_tokens),
+        *(_tool_fingerprint(tool) for tool in request.tools),
     )
 
 
@@ -341,3 +394,17 @@ def _structured_fingerprint[ResultT: BaseModel](
 
 def _fingerprint(*parts: str) -> str:
     return sha256("\x1f".join(parts).encode()).hexdigest()
+
+
+def _tool_payload(tool: FunctionTool) -> dict[str, object]:
+    return {
+        "type": "function",
+        "name": tool.name,
+        "description": tool.description,
+        "parameters": tool.parameters,
+        "strict": True,
+    }
+
+
+def _tool_fingerprint(tool: FunctionTool) -> str:
+    return json.dumps(_tool_payload(tool), sort_keys=True, separators=(",", ":"))

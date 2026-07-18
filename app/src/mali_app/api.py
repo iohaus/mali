@@ -1,6 +1,10 @@
 """HTTP adapter for the deterministic local Mali tutoring flow."""
 
+from collections.abc import Iterator
+from json import dumps
+
 from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import StreamingResponse
 from mali.actions import (
     Action,
     Actor,
@@ -9,17 +13,20 @@ from mali.actions import (
     RecordAnswer,
     StartCheck,
     StartPlacement,
+    TeachEpisode,
 )
 from mali.checkpoint import Question
 from mali.desk import TutorDesk
 from mali.errors import InvalidIdentifier
 from mali.ids import LearnerId, learner_id, question_id, skill_code
-from mali.rules import RefusalReason
+from mali.rules import RefusalReason, Refused, evaluate
 from mali.snapshot import Snapshot
 from mali.views import progress_map
 from pydantic import BaseModel
 
+from mali_app.degradation import DegradationController, DegradationLevel
 from mali_app.demo import demo_curriculum
+from mali_app.instructor import InstructorEpisode, InstructorEvent
 from mali_app.item_writer import ItemWriter
 from mali_app.model_gateway import ModelGateway, OpenAIModelGateway
 from mali_app.schema import DatabasePath
@@ -63,20 +70,42 @@ class AnswerRequest(BaseModel):
     answer: str
 
 
+class LessonRequest(BaseModel):
+    """One student turn supplied when opening or continuing a lesson."""
+
+    student_turn: str = ""
+
+
 def create_app(
     database: DatabasePath = _DEFAULT_DATABASE,
     *,
     enable_item_writer: bool = False,
+    enable_instructor: bool = False,
     model_gateway: ModelGateway | None = None,
+    degradation: DegradationController | None = None,
 ) -> FastAPI:
     """Create the small FastAPI product surface backed by one SQLite file."""
-    if model_gateway is not None and not enable_item_writer:
-        raise ValueError("a model gateway requires the Item Writer feature flag")
+    if model_gateway is not None and not (enable_item_writer or enable_instructor):
+        raise ValueError("a model gateway requires an enabled model feature")
     store = SQLiteRecordStore(database, demo_curriculum())
-    item_writer = (
-        ItemWriter(OpenAIModelGateway() if model_gateway is None else model_gateway)
-        if enable_item_writer
+    controller = (
+        DegradationController.from_environment() if degradation is None else degradation
+    )
+    needs_gateway = (
+        enable_instructor and controller.level is not DegradationLevel.STATIC
+    ) or (enable_item_writer and controller.level is DegradationLevel.NORMAL)
+    gateway = (
+        model_gateway
+        if model_gateway is not None
+        else OpenAIModelGateway()
+        if needs_gateway
         else None
+    )
+    item_writer = (
+        ItemWriter(gateway) if enable_item_writer and gateway is not None else None
+    )
+    instructor = (
+        InstructorEpisode(store, gateway, controller) if enable_instructor else None
     )
     app = FastAPI(title="Mali", version="v1")
 
@@ -142,9 +171,42 @@ def create_app(
         prompt = (
             question.instance.text
             if item_writer is None
-            else _item_writer_prompt(snapshot, question, item_writer)
+            else _item_writer_prompt(snapshot, question, item_writer, controller)
         )
         return _question_response(question, prompt)
+
+    def lesson(learner: str, request: LessonRequest) -> StreamingResponse:
+        identifier = _learner_or_error(learner)
+        snapshot = _snapshot_or_error(store, learner)
+        target = snapshot.progress.target
+        if instructor is None:
+            raise _request_error(
+                status.HTTP_404_NOT_FOUND,
+                "lesson_unavailable",
+                "Lessons are not enabled for this service.",
+            )
+        if target is None:
+            raise _request_error(
+                status.HTTP_409_CONFLICT,
+                "no_active_lesson",
+                "Choose a skill before starting a lesson.",
+            )
+        verdict = evaluate(
+            TeachEpisode(target),
+            snapshot.progress,
+            snapshot.checkpoint,
+            Actor.INSTRUCTOR,
+            snapshot.policy,
+        )
+        if isinstance(verdict, Refused):
+            refusal = verdict.reason
+            raise _request_error(
+                status.HTTP_409_CONFLICT, refusal.value, _REFUSAL_COPY[refusal]
+            )
+        return StreamingResponse(
+            _sse_stream(instructor.stream(identifier, snapshot, request.student_turn)),
+            media_type="text/event-stream",
+        )
 
     def submit_answer(learner: str, request: AnswerRequest) -> dict[str, object]:
         identifier = _learner_or_error(learner)
@@ -176,6 +238,7 @@ def create_app(
     app.add_api_route(
         "/v1/learners/{learner}/question", current_question, methods=["GET"]
     )
+    app.add_api_route("/v1/learners/{learner}/lesson", lesson, methods=["POST"])
     app.add_api_route("/v1/learners/{learner}/answers", submit_answer, methods=["POST"])
     return app
 
@@ -288,7 +351,10 @@ def _progress_response(snapshot: Snapshot) -> dict[str, object]:
 
 
 def _item_writer_prompt(
-    snapshot: Snapshot, question: Question, item_writer: ItemWriter
+    snapshot: Snapshot,
+    question: Question,
+    item_writer: ItemWriter,
+    degradation: DegradationController,
 ) -> str:
     skill = next(
         item
@@ -297,9 +363,28 @@ def _item_writer_prompt(
     )
     if skill.template is None:
         return question.instance.text
-    return item_writer.render(
-        snapshot.policy, skill.template, question.instance
-    ).question_text
+    checkpoint = snapshot.checkpoint
+    checkpoint_id = checkpoint.identifier if checkpoint is not None else None
+    if not degradation.use_item_writer(checkpoint_id):
+        return question.instance.text
+    result = item_writer.render(snapshot.policy, skill.template, question.instance)
+    degradation.report_item_writer(
+        checkpoint_id,
+        used_fallback=result.used_fallback,
+        gateway_failed=result.gateway_failed,
+    )
+    return result.question_text
+
+
+def _sse_stream(events: Iterator[InstructorEvent]) -> Iterator[str]:
+    """Encode typed Instructor events as a minimal server-sent-event stream."""
+    for event in events:
+        payload: dict[str, str] = {}
+        if event.text is not None:
+            payload["text"] = event.text
+        if event.outcome is not None:
+            payload["outcome"] = event.outcome.value
+        yield f"data: {dumps(payload, separators=(',', ':'))}\n\n"
 
 
 def _question_response(
