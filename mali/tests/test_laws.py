@@ -8,6 +8,7 @@ import pytest
 
 CORE_ROOT = Path(__file__).parents[1] / "src" / "mali"
 REPOSITORY_ROOT = CORE_ROOT.parents[2]
+PROMPT_ROOT = REPOSITORY_ROOT / "app" / "src" / "mali_app" / "prompts"
 BANNED_CORE_MODULES = frozenset(
     {
         "asyncio",
@@ -104,7 +105,7 @@ def test_repository_does_not_suppress_type_errors() -> None:
 
 @pytest.mark.parametrize("term", FORBIDDEN_REPOSITORY_TERMS)
 def test_public_text_uses_product_vocabulary(term: str) -> None:
-    public_files = (REPOSITORY_ROOT / "README.md",)
+    public_files = (REPOSITORY_ROOT / "README.md", *PROMPT_ROOT.glob("*.md"))
     violations = [
         path
         for path in public_files

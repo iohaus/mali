@@ -35,6 +35,7 @@ class FlowBudget:
     max_output_tokens: int
     max_episode_tokens: int
     item_writer_retries: int
+    recent_mistake_limit: int
 
     def __post_init__(self) -> None:
         values = (
@@ -43,6 +44,7 @@ class FlowBudget:
             self.max_output_tokens,
             self.max_episode_tokens,
             self.item_writer_retries,
+            self.recent_mistake_limit,
         )
         if any(type(value) is not int or value < 1 for value in values):
             raise InvalidPolicy("flow budgets must be positive integers")
@@ -60,6 +62,8 @@ class TutorPolicy:
     lucky_rates: tuple[tuple[AnswerType, Fraction], ...]
     stale_after: timedelta
     flow_budget: FlowBudget
+    instructor_prompt_version: str
+    item_writer_prompt_version: str
 
     def __post_init__(self) -> None:
         if not self.version:
@@ -72,6 +76,8 @@ class TutorPolicy:
             raise InvalidPolicy("pass rule cannot exceed the question budget")
         if self.stale_after <= timedelta(0):
             raise InvalidPolicy("checkpoint lifetime must be positive")
+        _validate_prompt_version(self.instructor_prompt_version, "instructor")
+        _validate_prompt_version(self.item_writer_prompt_version, "item_writer")
         miss = dict(self.miss_rates)
         lucky = dict(self.lucky_rates)
         expected = set(AnswerType)
@@ -93,6 +99,16 @@ class TutorPolicy:
         return dict(self.lucky_rates)[answer_type]
 
 
+def _validate_prompt_version(value: object, flow: str) -> None:
+    prefix = f"{flow}_v"
+    if (
+        not isinstance(value, str)
+        or not value.startswith(prefix)
+        or not value.removeprefix(prefix).isdigit()
+    ):
+        raise InvalidPolicy(f"{flow} prompt version must use the {prefix}N form")
+
+
 _DEFAULT_MISS_RATES = tuple(
     (answer_type, Fraction(1, 10)) for answer_type in AnswerType
 )
@@ -110,5 +126,7 @@ POLICY_V1 = TutorPolicy(
     miss_rates=_DEFAULT_MISS_RATES,
     lucky_rates=_DEFAULT_LUCKY_RATES,
     stale_after=timedelta(hours=24),
-    flow_budget=FlowBudget(8, 3, 800, 4_000, 2),
+    flow_budget=FlowBudget(8, 3, 800, 4_000, 2, 3),
+    instructor_prompt_version="instructor_v1",
+    item_writer_prompt_version="item_writer_v1",
 )

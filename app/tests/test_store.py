@@ -101,6 +101,8 @@ def test_record_store_commits_a_complete_deterministic_learning_flow(
     learner = learner_id("flow-learner")
     registered = store.register(learner, "Ada")
     assert not registered.progress.placed
+    assert registered.policy.instructor_prompt_version == "instructor_v1"
+    assert registered.policy.item_writer_prompt_version == "item_writer_v1"
 
     started = store.execute(learner, StartPlacement(), Actor.ENGINE)
     _require_snapshot(started.status, started.snapshot)

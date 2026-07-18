@@ -663,7 +663,10 @@ def _policy_payload(policy: TutorPolicy) -> str:
                 "max_output_tokens": policy.flow_budget.max_output_tokens,
                 "max_episode_tokens": policy.flow_budget.max_episode_tokens,
                 "item_writer_retries": policy.flow_budget.item_writer_retries,
+                "recent_mistake_limit": policy.flow_budget.recent_mistake_limit,
             },
+            "instructor_prompt_version": policy.instructor_prompt_version,
+            "item_writer_prompt_version": policy.item_writer_prompt_version,
         }
     )
 
@@ -696,6 +699,18 @@ def _policy_from_payload(payload: str) -> TutorPolicy:
             _integer(flow_budget["max_output_tokens"]),
             _integer(flow_budget["max_episode_tokens"]),
             _integer(flow_budget["item_writer_retries"]),
+            _integer(
+                flow_budget.get(
+                    "recent_mistake_limit",
+                    POLICY_V1.flow_budget.recent_mistake_limit,
+                )
+            ),
+        ),
+        _text(
+            data.get("instructor_prompt_version", POLICY_V1.instructor_prompt_version)
+        ),
+        _text(
+            data.get("item_writer_prompt_version", POLICY_V1.item_writer_prompt_version)
         ),
     )
 
