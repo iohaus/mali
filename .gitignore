@@ -5,6 +5,7 @@ __pycache__/
 .mypy_cache/
 .pyright/
 *.py[cod]
+*.db
 SUBMISSION_NOTES.md
 
 # Byte-compiled / optimized / DLL files

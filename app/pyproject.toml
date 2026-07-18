@@ -1,0 +1,46 @@
+[project]
+name = "mali-app"
+version = "0.1.0"
+description = "Mali Application"
+requires-python = ">=3.12"
+dependencies = ["fastapi==0.136.1", "mali", "uvicorn==0.47.0"]
+
+[project.scripts]
+mali = "mali_app.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+mali = { path = "../mali" }
+
+[dependency-groups]
+dev = [
+  "anyio==4.13.0",
+  "certifi==2026.4.22",
+  "click==8.4.0",
+  "httpx==0.28.1",
+  "idna==3.15",
+  "pydantic==2.12.5",
+  "pydantic-core==2.41.5",
+  "pyright>=1.1.0",
+  "pytest>=8.0",
+  "ruff>=0.8.0",
+  "starlette==0.52.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pyright]
+include = ["src", "tests"]
+typeCheckingMode = "strict"
+pythonVersion = "3.12"

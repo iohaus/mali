@@ -1,10 +1,12 @@
 """The pure planner that turns accepted tutoring actions into writes."""
 
 from dataclasses import dataclass, replace
+from hashlib import sha256
 
 from mali.actions import (
     Action,
     Actor,
+    AskQuestion,
     CertifyPlacement,
     ClearTarget,
     CloseStale,
@@ -16,10 +18,12 @@ from mali.actions import (
     StartCheck,
     StartPlacement,
 )
-from mali.checkpoint import Answer, CheckPoint, CheckPointKind
+from mali.checkpoint import Answer, CheckPoint, CheckPointKind, Question
+from mali.ids import QuestionId, question_id
 from mali.plans import ActionPlan, CheckPointWrite, JournalEntry, ProgressWrite
 from mali.rules import Refused, evaluate
 from mali.snapshot import Snapshot
+from mali.templates import canonical_answer
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,12 +113,13 @@ class TutorDesk:
         if isinstance(action, RecordAnswer):
             if snapshot.checkpoint is None:
                 raise AssertionError("accepted answer requires a checkpoint")
+            normalized = canonical_answer_for(action, snapshot.checkpoint)
             questions = tuple(
                 replace(
                     question,
                     answer=Answer(
-                        action.raw,
-                        action.raw.strip() == question.instance.key,
+                        normalized,
+                        normalized == question.instance.key,
                     ),
                 )
                 if question.identifier == action.question
@@ -123,6 +128,31 @@ class TutorDesk:
             )
             checkpoint = replace(snapshot.checkpoint, questions=questions)
             return ActionPlan((CheckPointWrite(checkpoint),), entry)
+        if isinstance(action, AskQuestion):
+            if snapshot.checkpoint is None:
+                raise AssertionError("accepted question requires a checkpoint")
+            skill = next(
+                item
+                for item in snapshot.progress.curriculum.skills
+                if item.code == action.skill
+            )
+            if skill.template is None:
+                raise ValueError("an assessable skill requires a question template")
+            checkpoint = snapshot.checkpoint
+            identifier = _question_identifier(checkpoint, len(checkpoint.questions))
+            question = Question(
+                identifier,
+                action.skill,
+                skill.template.instance(action.seed),
+            )
+            return ActionPlan(
+                (
+                    CheckPointWrite(
+                        replace(checkpoint, questions=(*checkpoint.questions, question))
+                    ),
+                ),
+                entry,
+            )
         if isinstance(action, CertifyPlacement):
             progress = replace(
                 snapshot.progress,
@@ -160,3 +190,19 @@ class TutorDesk:
             can_start_check=progress.target is not None and snapshot.checkpoint is None,
             engine_action=next_engine_action(snapshot.checkpoint, snapshot.policy),
         )
+
+
+def canonical_answer_for(action: RecordAnswer, checkpoint: CheckPoint) -> str:
+    """Return the already-accepted normalized answer for the named question."""
+    question = next(
+        item for item in checkpoint.questions if item.identifier == action.question
+    )
+    normalized = canonical_answer(question.instance.answer_type, action.raw)
+    if normalized is None:
+        raise AssertionError("accepted answer must be readable")
+    return normalized
+
+
+def _question_identifier(checkpoint: CheckPoint, position: int) -> QuestionId:
+    material = f"{checkpoint.identifier}:{position}".encode()
+    return question_id(f"q-{sha256(material).hexdigest()[:32]}")

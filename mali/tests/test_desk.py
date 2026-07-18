@@ -1,12 +1,14 @@
-from mali.actions import Actor, ProposeTarget
+from mali.actions import Actor, AskQuestion, ProposeTarget, RecordAnswer
+from mali.checkpoint import CheckPoint, CheckPointKind
 from mali.curriculum import Curriculum, Skill
 from mali.desk import TutorDesk
 from mali.ids import checkpoint_id, learner_id, skill_code
-from mali.plans import ProgressWrite
+from mali.plans import CheckPointWrite, ProgressWrite
 from mali.policy import POLICY_V1
 from mali.progress import Progress
 from mali.rules import RefusalReason, Refused
 from mali.snapshot import Snapshot
+from mali.templates import AnswerType, ParameterDomain, QuestionTemplate
 
 
 def _snapshot(placed: bool = True) -> Snapshot:
@@ -39,3 +41,39 @@ def test_available_lists_ready_targets_with_their_path() -> None:
     available = TutorDesk.available(_snapshot())
 
     assert available.targets == ((skill_code("parts"), (skill_code("parts"),)),)
+
+
+def test_question_and_answer_plans_preserve_the_canonical_answer() -> None:
+    template = QuestionTemplate(
+        (ParameterDomain("number", tuple(range(8))),),
+        "number",
+        "What is {number}?",
+        AnswerType.INTEGER,
+    )
+    skill = Skill(skill_code("parts"), 0, "Parts", "Understand parts.", template)
+    curriculum = Curriculum.load((skill,), ())
+    progress = Progress(
+        learner_id("answer-learner"), curriculum.version, 0, False, None, 0, curriculum
+    )
+    checkpoint = CheckPoint(
+        checkpoint_id("answer-check"), CheckPointKind.PLACEMENT, None, ()
+    )
+    snapshot = Snapshot(progress, checkpoint, POLICY_V1, None)
+    asked = TutorDesk.plan(AskQuestion(skill.code, 7), snapshot, Actor.ENGINE)
+    assert not isinstance(asked, Refused)
+    write = asked.writes[0]
+    assert isinstance(write, CheckPointWrite)
+    assert write.checkpoint is not None
+    question = write.checkpoint.questions[0]
+
+    answered = TutorDesk.plan(
+        RecordAnswer(question.identifier, f"  {question.instance.key}  "),
+        Snapshot(progress, write.checkpoint, POLICY_V1, None),
+        Actor.STUDENT,
+    )
+    assert not isinstance(answered, Refused)
+    answer_write = answered.writes[0]
+    assert isinstance(answer_write, CheckPointWrite)
+    assert answer_write.checkpoint is not None
+    assert answer_write.checkpoint.questions[0].answer is not None
+    assert answer_write.checkpoint.questions[0].answer.correct

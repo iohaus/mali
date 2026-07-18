@@ -2,6 +2,7 @@
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from fractions import Fraction
 from hashlib import sha256
 
 from mali.errors import (
@@ -16,6 +17,7 @@ from mali.errors import (
     UnknownSkill,
 )
 from mali.ids import SkillCode, skill_code
+from mali.templates import QuestionTemplate
 
 _MAX_SKILL_TITLE_LENGTH = 120
 _MAX_SKILL_CARD_LENGTH = 2_000
@@ -32,6 +34,7 @@ class Skill:
     bit_index: int
     title: str
     card: str
+    template: QuestionTemplate | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -273,7 +276,14 @@ def _version_for(
 ) -> str:
     canonical = (
         tuple(
-            (skill.code, skill.bit_index, skill.title, skill.card) for skill in skills
+            (
+                skill.code,
+                skill.bit_index,
+                skill.title,
+                skill.card,
+                _template_version_form(skill.template),
+            )
+            for skill in skills
         ),
         tuple((code, tuple(required)) for code, required in requirements),
     )
@@ -282,3 +292,23 @@ def _version_for(
 
 def _skill_mask(skill: Skill) -> int:
     return 1 << skill.bit_index
+
+
+def _template_version_form(template: QuestionTemplate | None) -> object:
+    if template is None:
+        return None
+    return (
+        tuple(
+            (parameter.name, tuple(str(Fraction(value)) for value in parameter.values))
+            for parameter in template.parameters
+        ),
+        template.key_expression,
+        template.plain_template,
+        template.answer_type.value,
+        tuple(
+            (constraint.kind.value, constraint.names)
+            for constraint in template.constraints
+        ),
+        tuple((value.name, value.expression) for value in template.display_values),
+        template.options,
+    )

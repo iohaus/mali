@@ -65,9 +65,15 @@ RuleVerdict = Allowed | Refused
 
 def next_engine_action(
     checkpoint: CheckPoint | None, policy: TutorPolicy
-) -> PassCheck | FailCheck | None:
+) -> CertifyPlacement | PassCheck | FailCheck | None:
     """Select the deterministic terminal action for an open mastery check."""
-    if checkpoint is None or checkpoint.kind is not CheckPointKind.CHECK:
+    if checkpoint is None:
+        return None
+    if checkpoint.kind is CheckPointKind.PLACEMENT:
+        if len(checkpoint.questions) >= policy.question_budget and all(
+            question.answer is not None for question in checkpoint.questions
+        ):
+            return CertifyPlacement()
         return None
     if has_passed(checkpoint.questions, policy.pass_rule.needed):
         return PassCheck()
