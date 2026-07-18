@@ -20,6 +20,8 @@ from mali.views import progress_map
 from pydantic import BaseModel
 
 from mali_app.demo import demo_curriculum
+from mali_app.item_writer import ItemWriter
+from mali_app.model_gateway import ModelGateway, OpenAIModelGateway
 from mali_app.schema import DatabasePath
 from mali_app.store import LearnerNotFound, SQLiteRecordStore, StoreError
 from mali_app.store_types import ExecutionResult, ExecutionStatus
@@ -61,9 +63,21 @@ class AnswerRequest(BaseModel):
     answer: str
 
 
-def create_app(database: DatabasePath = _DEFAULT_DATABASE) -> FastAPI:
+def create_app(
+    database: DatabasePath = _DEFAULT_DATABASE,
+    *,
+    enable_item_writer: bool = False,
+    model_gateway: ModelGateway | None = None,
+) -> FastAPI:
     """Create the small FastAPI product surface backed by one SQLite file."""
+    if model_gateway is not None and not enable_item_writer:
+        raise ValueError("a model gateway requires the Item Writer feature flag")
     store = SQLiteRecordStore(database, demo_curriculum())
+    item_writer = (
+        ItemWriter(OpenAIModelGateway() if model_gateway is None else model_gateway)
+        if enable_item_writer
+        else None
+    )
     app = FastAPI(title="Mali", version="v1")
 
     def register(request: RegisterRequest) -> dict[str, object]:
@@ -125,7 +139,12 @@ def create_app(database: DatabasePath = _DEFAULT_DATABASE) -> FastAPI:
                 "no_question",
                 "There is no question to answer.",
             )
-        return _question_response(question)
+        prompt = (
+            question.instance.text
+            if item_writer is None
+            else _item_writer_prompt(snapshot, question, item_writer)
+        )
+        return _question_response(question, prompt)
 
     def submit_answer(learner: str, request: AnswerRequest) -> dict[str, object]:
         identifier = _learner_or_error(learner)
@@ -268,10 +287,27 @@ def _progress_response(snapshot: Snapshot) -> dict[str, object]:
     }
 
 
-def _question_response(question: Question) -> dict[str, object]:
+def _item_writer_prompt(
+    snapshot: Snapshot, question: Question, item_writer: ItemWriter
+) -> str:
+    skill = next(
+        item
+        for item in snapshot.progress.curriculum.skills
+        if item.code == question.skill
+    )
+    if skill.template is None:
+        return question.instance.text
+    return item_writer.render(
+        snapshot.policy, skill.template, question.instance
+    ).question_text
+
+
+def _question_response(
+    question: Question, prompt: str | None = None
+) -> dict[str, object]:
     return {
         "question_id": question.identifier,
-        "prompt": question.instance.text,
+        "prompt": question.instance.text if prompt is None else prompt,
         "answer_type": question.instance.answer_type.value,
         "options": question.instance.options,
     }
