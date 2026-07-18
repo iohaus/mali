@@ -3,7 +3,7 @@ name = "mali-app"
 version = "0.1.0"
 description = "Mali Application"
 requires-python = ">=3.12"
-dependencies = ["fastapi==0.136.1", "mali", "uvicorn==0.47.0"]
+dependencies = ["fastapi==0.136.1", "mali", "openai>=2.0", "uvicorn==0.47.0"]
 
 [project.scripts]
 mali = "mali_app.cli:main"

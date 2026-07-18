@@ -86,7 +86,10 @@ def test_core_does_not_import_boundary_modules() -> None:
 def _is_third_party_path(path: Path) -> bool:
     # ignore virtualenvs, site-packages and common build dirs inside the repo
     forbidden = {"site-packages", ".venv", "venv", "env", ".env", ".tox", ".eggs"}
-    return any(part in forbidden or part.startswith(".") and part != "." for part in path.parts)
+    return any(
+        part in forbidden or part.startswith(".") and part != "." for part in path.parts
+    )
+
 
 def test_repository_does_not_suppress_type_errors() -> None:
     suppression = "type" + ": ignore"
