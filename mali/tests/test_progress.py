@@ -1,3 +1,5 @@
+from itertools import product
+
 import pytest
 
 from mali.checkpoint import (
@@ -103,3 +105,21 @@ def test_check_point_and_pass_arithmetic() -> None:
 
     assert has_passed(checkpoint.questions, 1)
     assert cannot_pass(checkpoint.questions, 2, 2)
+    assert not has_passed(checkpoint.questions, 2)
+
+
+def test_complete_check_has_exactly_one_terminal_outcome() -> None:
+    instance = _instance()
+    for answers in product((False, True), repeat=3):
+        questions = tuple(
+            Question(
+                question_id(f"question-{index}"),
+                skill_code("parts"),
+                instance,
+                Answer(instance.key if correct else "99", correct),
+            )
+            for index, correct in enumerate(answers)
+        )
+        passed = has_passed(questions, 2)
+        failed = cannot_pass(questions, 2, 3)
+        assert passed != failed

@@ -76,22 +76,23 @@ def has_passed(questions: tuple[Question, ...], needed: int) -> bool:
     """Return whether a check has enough correct answers to pass."""
     if type(needed) is not int or needed < 1:
         raise InvalidCheckpoint("required correct answers must be positive")
-    return (
-        sum(
-            question.answer is not None and question.answer.correct
-            for question in questions
-        )
-        >= needed
-    )
+    correct = 0
+    for question in questions:
+        if question.answer is not None and question.answer.correct:
+            correct += 1
+            if correct >= needed:
+                return True
+    return False
 
 
 def cannot_pass(questions: tuple[Question, ...], needed: int, limit: int) -> bool:
     """Return whether the remaining questions cannot satisfy a pass rule."""
     if type(limit) is not int or limit < needed:
         raise InvalidCheckpoint("question limit must cover the pass requirement")
-    answered = sum(question.answer is not None for question in questions)
-    correct = sum(
-        question.answer is not None and question.answer.correct
-        for question in questions
-    )
-    return correct + (limit - answered) < needed
+    correct = 0
+    for index, question in enumerate(questions, start=1):
+        if question.answer is not None and question.answer.correct:
+            correct += 1
+        if correct + (limit - index) < needed:
+            return True
+    return correct + (limit - len(questions)) < needed
