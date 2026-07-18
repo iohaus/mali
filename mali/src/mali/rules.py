@@ -5,11 +5,14 @@ from enum import StrEnum
 
 from mali.actions import (
     Actor,
+    FailCheck,
     OverrideMastery,
+    PassCheck,
     ProposeTarget,
     TeachEpisode,
 )
-from mali.checkpoint import CheckPoint
+from mali.checkpoint import CheckPoint, CheckPointKind, cannot_pass, has_passed
+from mali.policy import TutorPolicy
 from mali.progress import Progress
 
 
@@ -40,6 +43,21 @@ class Refused:
 
 
 RuleVerdict = Allowed | Refused
+
+
+def next_engine_action(
+    checkpoint: CheckPoint | None, policy: TutorPolicy
+) -> PassCheck | FailCheck | None:
+    """Select the deterministic terminal action for an open mastery check."""
+    if checkpoint is None or checkpoint.kind is not CheckPointKind.CHECK:
+        return None
+    if has_passed(checkpoint.questions, policy.pass_rule.needed):
+        return PassCheck()
+    if cannot_pass(
+        checkpoint.questions, policy.pass_rule.needed, policy.pass_rule.asked
+    ):
+        return FailCheck()
+    return None
 
 
 def start_placement(
