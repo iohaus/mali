@@ -47,3 +47,7 @@ class InvalidTemplate(MaliDomainError):
 
 class InvalidCheckpoint(MaliDomainError):
     """Raised when a learner checkpoint is not well formed."""
+
+
+class JournalCorruption(MaliDomainError):
+    """Raised when a journal cannot reproduce a valid learner record."""
