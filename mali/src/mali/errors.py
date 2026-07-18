@@ -43,3 +43,7 @@ class InvalidProgress(MaliDomainError):
 
 class InvalidTemplate(MaliDomainError):
     """Raised when a question template is not safe to use."""
+
+
+class InvalidCheckpoint(MaliDomainError):
+    """Raised when a learner checkpoint is not well formed."""

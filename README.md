@@ -27,6 +27,6 @@ uv run pytest
 
 ## Current status
 
-The initial foundation establishes the validated curriculum types and the
-test, lint, and type-checking gates that protect the tutoring core. The next
-increment adds prerequisite-aware curriculum loading and learner progress.
+The initial foundation validates curricula and deterministic question templates,
+then carries learner progress and assessment checkpoints as immutable typed
+records. The next increment adds placement estimates and question selection.
