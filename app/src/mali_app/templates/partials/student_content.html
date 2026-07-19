@@ -1,11 +1,49 @@
-<main id="student-content" class="student-layout">
+<main id="student-content" class="student-layout{% if needs_topic %} student-layout-single{% endif %}">
+  {% if needs_topic %}
+  <section class="curriculum-card curriculum-card-hero" aria-labelledby="curriculum-title">
+    <div class="card-heading">
+      <div>
+        <p class="eyebrow">Your curriculum</p>
+        <h1 id="curriculum-title">What would you like to learn?</h1>
+      </div>
+      <span class="learner-label">{{ learner }}</span>
+    </div>
+    <p class="lede curriculum-summary">Name any topic or goal. Mali will design a step-by-step curriculum with practice it can check fairly.</p>
+    <form id="curriculum-form" class="curriculum-form" data-stream-path="/learners/{{ learner }}/curriculum/stream">
+      <label class="sr-only" for="learning-topic">What would you like to learn?</label>
+      <input id="learning-topic" name="topic" required maxlength="200" autocomplete="off" placeholder="For example: telling time on an analog clock">
+      <button type="submit">Build my curriculum</button>
+    </form>
+    <div id="curriculum-status" class="processing-status" role="status" aria-live="polite" hidden></div>
+    <ol id="curriculum-steps" class="curriculum-steps" hidden></ol>
+    <button id="curriculum-start" class="curriculum-start" type="button" hidden>Start learning</button>
+  </section>
+  {% else %}
+  <section class="curriculum-card" aria-labelledby="curriculum-title">
+    <div class="card-heading">
+      <div>
+        <p class="eyebrow">Your curriculum</p>
+        <h1 id="curriculum-title">{{ curriculum_title }}</h1>
+      </div>
+      <span class="learner-label">{{ learner }}</span>
+    </div>
+    <p class="lede curriculum-summary">{{ curriculum_summary }}</p>
+    {% if can_rebuild %}
+    <form id="curriculum-form" class="curriculum-form" data-stream-path="/learners/{{ learner }}/curriculum/stream">
+      <label class="sr-only" for="learning-topic">Learn something new</label>
+      <input id="learning-topic" name="topic" required maxlength="200" autocomplete="off" placeholder="Learn something new instead">
+      <button type="submit">Build a new curriculum</button>
+    </form>
+    {% endif %}
+    <div id="curriculum-status" class="processing-status" role="status" aria-live="polite" hidden></div>
+  </section>
+
   <section class="conversation-card" aria-labelledby="lesson-title">
     <div class="card-heading">
       <div>
         <p class="eyebrow">Your lesson</p>
         <h1 id="lesson-title">{{ status_copy }}</h1>
       </div>
-      <span class="learner-label">{{ learner }}</span>
     </div>
 
     <div id="lesson-messages" class="lesson-messages" aria-live="polite">
@@ -53,7 +91,7 @@
   </aside>
 
   <section class="practice-card" aria-labelledby="practice-title">
-    <p class="eyebrow">Practice</p>
+    <p class="eyebrow">Guided practice</p>
     <h2 id="practice-title">{% if question %}Your question{% elif not placed %}Find your starting point{% elif target_title %}Ready when you are{% else %}Choose your next step{% endif %}</h2>
 
     {% if question %}
@@ -95,17 +133,18 @@
     {% if placed and not question %}
       <div class="skill-actions">
         <h3>Choose a skill</h3>
-        {% for title in progress.next_up %}
-          <form hx-post="/learners/{{ learner }}/targets/{{ title|lower|replace(' ', '-') }}" hx-target="#student-content" hx-swap="outerHTML">
+        {% for code, title in next_up_skills %}
+          <form hx-post="/learners/{{ learner }}/targets/{{ code }}" hx-target="#student-content" hx-swap="outerHTML">
             <button class="skill-button" type="submit">{{ title }}</button>
           </form>
         {% endfor %}
-        {% for title in progress.later %}
-          <form hx-post="/learners/{{ learner }}/targets/{{ title|lower|replace(' ', '-') }}" hx-target="#student-content" hx-swap="outerHTML">
+        {% for code, title in later_skills %}
+          <form hx-post="/learners/{{ learner }}/targets/{{ code }}" hx-target="#student-content" hx-swap="outerHTML">
             <button class="skill-button skill-button-later" type="submit">{{ title }}</button>
           </form>
         {% endfor %}
       </div>
     {% endif %}
   </section>
+  {% endif %}
 </main>

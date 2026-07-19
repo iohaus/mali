@@ -26,7 +26,8 @@ def test_open_database_enables_wal_and_creates_the_record_schema() -> None:
             "learning_journal",
             "teaching_trace",
         } <= tables
-        assert version == (3,)
+        assert "learning_path" not in tables
+        assert version == (5,)
     finally:
         connection.close()
 
@@ -36,7 +37,7 @@ def test_migrations_are_idempotent() -> None:
     try:
         apply_migrations(connection)
         apply_migrations(connection)
-        assert connection.execute("PRAGMA user_version").fetchone() == (3,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (5,)
     finally:
         connection.close()
 
@@ -44,7 +45,9 @@ def test_migrations_are_idempotent() -> None:
 def test_migration_renames_the_checkpoint_archive_column() -> None:
     connection = sqlite3.connect(":memory:")
     try:
-        connection.execute("CREATE TABLE checkpoint (placement_data TEXT)")
+        connection.execute(
+            "CREATE TABLE checkpoint (learner TEXT, placement_data TEXT)"
+        )
         connection.execute(
             """
             CREATE TABLE teaching_trace (
@@ -59,6 +62,12 @@ def test_migration_renames_the_checkpoint_archive_column() -> None:
             )
             """
         )
+        connection.execute("CREATE TABLE learner (id TEXT PRIMARY KEY)")
+        connection.execute("CREATE TABLE curriculum (version TEXT PRIMARY KEY)")
+        connection.execute(
+            "CREATE TABLE progress (learner TEXT, curriculum_version TEXT)"
+        )
+        connection.execute("CREATE TABLE learning_journal (learner TEXT)")
         connection.execute("PRAGMA user_version = 1")
 
         apply_migrations(connection)
@@ -68,5 +77,10 @@ def test_migration_renames_the_checkpoint_archive_column() -> None:
         }
         assert "estimate" in columns
         assert "placement_data" not in columns
+        assert "curriculum_version" in columns
+        learner_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(learner)")
+        }
+        assert "active_curriculum" in learner_columns
     finally:
         connection.close()

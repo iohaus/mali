@@ -8,11 +8,13 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from mali.ids import learner_id
 from pydantic import BaseModel
 
 from mali_app.api import create_app
 from mali_app.cli import run
 from mali_app.degradation import DegradationController, DegradationLevel
+from mali_app.demo import demo_curriculum
 from mali_app.model_gateway import (
     GatewaySchemaViolation,
     GatewayUnavailable,
@@ -21,6 +23,7 @@ from mali_app.model_gateway import (
     StreamRequest,
     StructuredRequest,
 )
+from mali_app.store import SQLiteRecordStore
 
 
 class ScriptedInstructorGateway:
@@ -86,7 +89,7 @@ def test_instructor_returns_adversarial_tool_attempts_as_data_and_keeps_state(
     client = TestClient(
         create_app(database, enable_instructor=True, model_gateway=gateway)
     )
-    _place_and_target(client, "adversarial-learner")
+    _place_and_target(client, database, "adversarial-learner")
     before = _learner_state(database, "adversarial-learner")
 
     response = client.post(
@@ -142,7 +145,7 @@ def test_instructor_budget_closes_with_a_typed_sse_outcome(tmp_path: Path) -> No
     client = TestClient(
         create_app(database, enable_instructor=True, model_gateway=gateway)
     )
-    _place_and_target(client, "budget-learner")
+    _place_and_target(client, database, "budget-learner")
 
     response = client.post(
         "/v1/learners/budget-learner/lesson", json={"student_turn": "help"}
@@ -176,7 +179,7 @@ def test_gateway_outage_auto_trips_static_instructor_mode(tmp_path: Path) -> Non
             degradation=controller,
         )
     )
-    _place_and_target(client, "outage-learner")
+    _place_and_target(client, database, "outage-learner")
 
     first = client.post(
         "/v1/learners/outage-learner/lesson", json={"student_turn": "help"}
@@ -208,6 +211,7 @@ def test_writer_fallback_stays_within_one_checkpoint(tmp_path: Path) -> None:
     client.post(
         "/v1/learners", json={"learner_id": "writer-learner", "display_name": "Ada"}
     )
+    _adopt_demo_curriculum(database, "writer-learner")
     assert client.post("/v1/learners/writer-learner/placement").status_code == 200
 
     first = client.get("/v1/learners/writer-learner/question")
@@ -249,7 +253,7 @@ def test_l2_mode_completes_the_model_free_learning_flow(tmp_path: Path) -> None:
         )
     )
 
-    _place_and_target(client, "l2-learner")
+    _place_and_target(client, database, "l2-learner")
     assert client.post("/v1/learners/l2-learner/check").status_code == 200
     for _ in range(3):
         _answer_current_question(client, "l2-learner")
@@ -259,11 +263,21 @@ def test_l2_mode_completes_the_model_free_learning_flow(tmp_path: Path) -> None:
     assert run(("audit", "--database", database, "--learner", "l2-learner")) == 0
 
 
-def _place_and_target(client: TestClient, learner: str) -> None:
+def _adopt_demo_curriculum(database: str, learner: str) -> None:
+    SQLiteRecordStore(database).adopt_curriculum(
+        learner_id(learner),
+        demo_curriculum(),
+        title="Fraction foundations",
+        summary="Practice fractions one step at a time.",
+    )
+
+
+def _place_and_target(client: TestClient, database: str, learner: str) -> None:
     registered = client.post(
         "/v1/learners", json={"learner_id": learner, "display_name": "Ada"}
     )
     assert registered.status_code == 201
+    _adopt_demo_curriculum(database, learner)
     assert client.post(f"/v1/learners/{learner}/placement").status_code == 200
     for _ in range(5):
         _answer_current_question(client, learner)

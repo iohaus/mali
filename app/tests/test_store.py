@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import Barrier
 
+import pytest
 from mali.actions import (
     Actor,
     AskQuestion,
@@ -20,7 +21,14 @@ from mali.templates import AnswerType, ParameterDomain, QuestionTemplate
 
 from mali_app.fresh import CountingFreshSource, SystemFreshSource
 from mali_app.schema import open_database
-from mali_app.store import SQLiteRecordStore
+from mali_app.store import (
+    CheckInProgressError,
+    CurriculumNotChosen,
+    LearnerAlreadyRegistered,
+    LearnerNotFound,
+    SQLiteRecordStore,
+    TopicNotAdopted,
+)
 from mali_app.store_types import ExecutionStatus
 
 
@@ -41,11 +49,18 @@ def _curriculum() -> Curriculum:
 
 
 def _store(path: str) -> SQLiteRecordStore:
-    return SQLiteRecordStore(
-        path,
+    return SQLiteRecordStore(path, clock=FrozenClock(), fresh=CountingFreshSource())
+
+
+def _register_with_curriculum(
+    store: SQLiteRecordStore, learner: LearnerId, display_name: str
+) -> Snapshot:
+    store.register(learner, display_name)
+    return store.adopt_curriculum(
+        learner,
         _curriculum(),
-        clock=FrozenClock(),
-        fresh=CountingFreshSource(),
+        title="Parts practice",
+        summary="Understand equal parts one step at a time.",
     )
 
 
@@ -99,7 +114,7 @@ def test_record_store_commits_a_complete_deterministic_learning_flow(
     database = str(tmp_path / "mali.db")
     store = _store(database)
     learner = learner_id("flow-learner")
-    registered = store.register(learner, "Ada")
+    registered = _register_with_curriculum(store, learner, "Ada")
     assert not registered.progress.placed
     assert registered.policy.instructor_prompt_version == "instructor_v1"
     assert registered.policy.item_writer_prompt_version == "item_writer_v1"
@@ -125,14 +140,143 @@ def test_record_store_commits_a_complete_deterministic_learning_flow(
     assert store.audit(learner).valid
 
 
+def _second_curriculum() -> Curriculum:
+    template = QuestionTemplate(
+        (ParameterDomain("count", tuple(range(1, 9))),),
+        "count * 2",
+        "How many shoes fit {count} pairs?",
+        AnswerType.INTEGER,
+    )
+    pairs = Skill(skill_code("pairs"), 0, "Pairs", "Count objects in pairs.", template)
+    return Curriculum.load((pairs,), ())
+
+
+def test_learner_topics_lists_only_that_learner_and_switching_preserves_progress(
+    tmp_path: Path,
+) -> None:
+    store = _store(str(tmp_path / "topics.db"))
+    learner = learner_id("topic-learner")
+    other = learner_id("other-learner")
+    _register_with_curriculum(store, learner, "Ada")
+    store.register(other, "Grace")
+    first_version = store.snapshot(learner).progress.curriculum_version
+    store.adopt_curriculum(
+        learner,
+        _second_curriculum(),
+        title="Counting pairs",
+        summary="Count in twos with everyday objects.",
+    )
+
+    person = store.learner_topics(learner)
+    assert person.learner == learner
+    assert person.display_name == "Ada"
+    titles = {topic.title: topic for topic in person.topics}
+    assert set(titles) == {"Parts practice", "Counting pairs"}
+    assert titles["Counting pairs"].active
+    assert not titles["Parts practice"].active
+    assert titles["Parts practice"].skill_count == 1
+    assert store.learner_topics(other).topics == ()
+
+    resumed = store.switch_topic(learner, first_version)
+
+    assert resumed.progress.curriculum_version == first_version
+    refreshed = {topic.title: topic for topic in store.learner_topics(learner).topics}
+    assert refreshed["Parts practice"].active
+    assert not refreshed["Counting pairs"].active
+    with pytest.raises(TopicNotAdopted):
+        store.switch_topic(learner, "not-a-saved-version")
+    with pytest.raises(LearnerNotFound):
+        store.learner_topics(learner_id("never-registered"))
+
+
+def test_registering_a_known_learner_is_a_typed_returning_state(
+    tmp_path: Path,
+) -> None:
+    store = _store(str(tmp_path / "returning.db"))
+    learner = learner_id("returning-learner")
+    store.register(learner, "Ada")
+
+    with pytest.raises(LearnerAlreadyRegistered):
+        store.register(learner, "Ada Again")
+
+    audit = store.audit(learner)
+    assert audit.valid
+
+
+def test_learner_without_a_curriculum_is_a_typed_state_not_an_error(
+    tmp_path: Path,
+) -> None:
+    store = _store(str(tmp_path / "unstarted.db"))
+    learner = learner_id("unstarted-learner")
+    store.register(learner, "Ada")
+
+    with pytest.raises(CurriculumNotChosen):
+        store.snapshot(learner)
+    audit = store.audit(learner)
+    assert audit.valid
+    assert "no curriculum chosen yet" in audit.detail
+
+
+def test_adoption_is_refused_while_a_check_is_open(tmp_path: Path) -> None:
+    store = _store(str(tmp_path / "open-check.db"))
+    learner = learner_id("busy-learner")
+    _register_with_curriculum(store, learner, "Ada")
+    started = store.execute(learner, StartPlacement(), Actor.ENGINE)
+    _require_snapshot(started.status, started.snapshot)
+
+    with pytest.raises(CheckInProgressError):
+        store.adopt_curriculum(
+            learner,
+            _second_curriculum(),
+            title="Pairs practice",
+            summary="Count in twos with confidence.",
+        )
+
+
+def test_switching_curricula_keeps_each_record_separate_and_audit_clean(
+    tmp_path: Path,
+) -> None:
+    store = _store(str(tmp_path / "switch.db"))
+    learner = learner_id("switch-learner")
+    _register_with_curriculum(store, learner, "Ada")
+
+    started = store.execute(learner, StartPlacement(), Actor.ENGINE)
+    _require_snapshot(started.status, started.snapshot)
+    for _ in range(POLICY_V1.question_budget):
+        _answer_open_question(store, learner)
+    placed = _run_engine(store, learner)
+    assert placed.progress.placed
+    first_version = placed.progress.curriculum_version
+
+    switched = store.adopt_curriculum(
+        learner,
+        _second_curriculum(),
+        title="Pairs practice",
+        summary="Count in twos with confidence.",
+    )
+    assert switched.progress.curriculum_version != first_version
+    assert not switched.progress.placed
+    assert switched.progress.mask == 0
+    assert store.audit(learner).valid
+
+    returned = store.adopt_curriculum(
+        learner,
+        _curriculum(),
+        title="Parts practice",
+        summary="Understand equal parts one step at a time.",
+    )
+    assert returned.progress.curriculum_version == first_version
+    assert returned.progress.placed
+    assert store.audit(learner).valid
+
+
 def test_conflicting_expected_versions_commit_once_and_report_a_stale_record(
     tmp_path: Path,
 ) -> None:
     database = str(tmp_path / "conflict.db")
     learner = learner_id("conflict-learner")
-    curriculum = _curriculum()
-    initial = SQLiteRecordStore(database, curriculum, clock=FrozenClock())
-    initial.register(learner, "Ada")
+    initial = SQLiteRecordStore(database, clock=FrozenClock())
+    _register_with_curriculum(initial, learner, "Ada")
     connection = open_database(database)
     try:
         connection.execute(
@@ -146,7 +290,6 @@ def test_conflicting_expected_versions_commit_once_and_report_a_stale_record(
     def fire() -> ExecutionStatus:
         store = SQLiteRecordStore(
             database,
-            curriculum,
             clock=FrozenClock(),
             fresh=SystemFreshSource(),
         )

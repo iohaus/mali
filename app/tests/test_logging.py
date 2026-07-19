@@ -16,10 +16,16 @@ def test_record_logs_commit_and_refusal_without_display_name(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     learner = learner_id("logging-learner")
-    store = SQLiteRecordStore(str(tmp_path / "logging.db"), demo_curriculum())
+    store = SQLiteRecordStore(str(tmp_path / "logging.db"))
 
     with caplog.at_level(logging.DEBUG, logger="mali_app.store"):
         store.register(learner, "Private student name")
+        store.adopt_curriculum(
+            learner,
+            demo_curriculum(),
+            title="Fraction foundations",
+            summary="Practice fractions one step at a time.",
+        )
         committed = store.execute(learner, StartPlacement(), Actor.ENGINE)
         refused = store.execute(learner, StartPlacement(), Actor.ENGINE)
 

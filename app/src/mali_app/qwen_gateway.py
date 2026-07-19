@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Protocol, cast
 
 from pydantic import BaseModel, ValidationError
@@ -20,8 +21,11 @@ from mali_app.model_gateway import (
     _log_request_failure,
 )
 
-DEFAULT_QWEN_MODEL = "qwen3.7-plus"
+DEFAULT_QWEN_MODEL = "qwen3.6-flash"
 DEFAULT_QWEN_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+# Low temperature keeps JSON-mode drafts format-compliant; streamed teaching
+# keeps the provider default so lessons stay lively.
+_STRUCTURED_TEMPERATURE = 0.2
 
 
 class _ChatCompletionsApi(Protocol):
@@ -56,15 +60,16 @@ class QwenModelGateway(OpenAIModelGateway):
         retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
         client: _QwenClient | None = None,
     ) -> None:
+        resolved_model = os.environ.get("QWEN_MODEL", model)
         super().__init__(
-            model=model,
+            model=resolved_model,
             base_url=base_url,
             api_key=api_key,
             timeout_seconds=timeout_seconds,
             retry_attempts=retry_attempts,
             client=cast(object, client),
         )
-        self._identity = ModelIdentity("qwen", model)
+        self._identity = ModelIdentity("qwen", resolved_model)
 
     def structured[ResultT: BaseModel](
         self, request: StructuredRequest[ResultT]
@@ -83,12 +88,13 @@ class QwenModelGateway(OpenAIModelGateway):
                         {"role": "user", "content": request.input},
                     ],
                     max_tokens=request.max_output_tokens,
+                    temperature=_STRUCTURED_TEMPERATURE,
                     response_format={"type": "json_object"},
                     extra_body={"enable_thinking": False},
                 )
                 content = _message_content(response)
                 try:
-                    parsed = json.loads(content)
+                    parsed = json.loads(_without_code_fences(content))
                 except json.JSONDecodeError as error:
                     raise GatewaySchemaViolation(
                         "Qwen did not return a JSON object"
@@ -141,6 +147,19 @@ def _structured_instructions[ResultT: BaseModel](
         "Return only one JSON object that validates against this schema. "
         f"Schema: {schema}"
     )
+
+
+def _without_code_fences(content: str) -> str:
+    """Accept fenced JSON some Qwen models emit despite JSON mode."""
+    text = content.strip()
+    if not text.startswith("```"):
+        return text
+    first_break = text.find("\n")
+    if first_break < 0:
+        return text
+    body = text[first_break + 1 :]
+    closing = body.rfind("```")
+    return body[:closing].strip() if closing >= 0 else body.strip()
 
 
 def _message_content(response: object) -> str:

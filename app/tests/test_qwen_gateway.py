@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from pydantic import BaseModel
 
 from mali_app.model_gateway import FunctionTool, StreamRequest, StructuredRequest
-from mali_app.qwen_gateway import QwenModelGateway
+from mali_app.qwen_gateway import DEFAULT_QWEN_MODEL, QwenModelGateway
 
 
 class WrittenItem(BaseModel):
@@ -24,7 +24,19 @@ def test_qwen_gateway_uses_json_mode_for_structured_output() -> None:
     assert result == WrittenItem(question_text="What is one half plus one half?")
     assert chat.calls[0]["response_format"] == {"type": "json_object"}
     assert chat.calls[0]["extra_body"] == {"enable_thinking": False}
+    assert chat.calls[0]["temperature"] == 0.2
     assert "JSON object" in chat.calls[0]["messages"][0]["content"]
+
+
+def test_qwen_gateway_accepts_fenced_json_despite_json_mode() -> None:
+    chat = FakeChatCompletions('```json\n{"question_text":"How many halves?"}\n```')
+    gateway = QwenModelGateway(client=FakeQwenClient(FakeResponses(), FakeChat(chat)))
+
+    result = gateway.structured(
+        StructuredRequest("Write one item.", "Use halves.", 50, WrittenItem)
+    )
+
+    assert result == WrittenItem(question_text="How many halves?")
 
 
 def test_qwen_gateway_uses_responses_streaming_without_strict_tools() -> None:
@@ -52,7 +64,7 @@ def test_qwen_gateway_uses_responses_streaming_without_strict_tools() -> None:
             "parameters": tool.parameters,
         }
     ]
-    assert gateway.identity.trace_label == "qwen:qwen3.7-plus"
+    assert gateway.identity.trace_label == f"qwen:{DEFAULT_QWEN_MODEL}"
 
 
 class FakeResponses:

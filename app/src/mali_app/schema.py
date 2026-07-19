@@ -141,6 +141,60 @@ _MIGRATIONS: tuple[tuple[str, ...], ...] = (
         ADD COLUMN episode_outcome TEXT NOT NULL DEFAULT 'completed'
         """,
     ),
+    (
+        """
+        CREATE TABLE learning_path (
+            learner TEXT PRIMARY KEY REFERENCES learner(id),
+            topic TEXT NOT NULL,
+            title TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            steps TEXT NOT NULL,
+            model TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """,
+    ),
+    (
+        "DROP TABLE learning_path",
+        """
+        ALTER TABLE learner
+        ADD COLUMN active_curriculum TEXT REFERENCES curriculum(version)
+        """,
+        """
+        UPDATE learner SET active_curriculum = (
+            SELECT curriculum_version FROM progress
+            WHERE progress.learner = learner.id LIMIT 1
+        )
+        """,
+        "ALTER TABLE curriculum ADD COLUMN summary TEXT NOT NULL DEFAULT ''",
+        """
+        ALTER TABLE learning_journal
+        ADD COLUMN curriculum_version TEXT NOT NULL DEFAULT ''
+        """,
+        """
+        UPDATE learning_journal SET curriculum_version = COALESCE(
+            (
+                SELECT curriculum_version FROM progress
+                WHERE progress.learner = learning_journal.learner LIMIT 1
+            ),
+            ''
+        )
+        """,
+        """
+        ALTER TABLE checkpoint
+        ADD COLUMN curriculum_version TEXT NOT NULL DEFAULT ''
+        """,
+        """
+        UPDATE checkpoint SET curriculum_version = COALESCE(
+            (
+                SELECT curriculum_version FROM progress
+                WHERE progress.learner = checkpoint.learner LIMIT 1
+            ),
+            ''
+        )
+        """,
+    ),
 )
 
 

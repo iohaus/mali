@@ -52,17 +52,19 @@ from mali_app.fresh import FreshSource, SystemFreshSource
 from mali_app.schema import DatabasePath, open_database
 from mali_app.store_types import (
     AuditResult,
+    CurriculumDisplay,
     ExecutionResult,
     ExecutionStatus,
+    LearnerTopic,
     LearningClaim,
     QuestionEvidence,
+    ReturningLearner,
     TeacherLearnerDetail,
     TeacherLearnerSummary,
     TeachingTrace,
 )
 
 _MAX_EXECUTION_ATTEMPTS = 2
-_CURRICULUM_TITLE = "Mali curriculum"
 _LOG = logging.getLogger(__name__)
 
 
@@ -72,6 +74,22 @@ class StoreError(Exception):
 
 class LearnerNotFound(StoreError):
     """Raised when a requested learner has no durable progress row."""
+
+
+class LearnerAlreadyRegistered(StoreError):
+    """Raised when a registration id already belongs to a learner."""
+
+
+class CurriculumNotChosen(StoreError):
+    """Raised when a learner has not yet adopted any curriculum."""
+
+
+class TopicNotAdopted(StoreError):
+    """Raised when a learner asks to continue a topic they never started."""
+
+
+class CheckInProgressError(StoreError):
+    """Raised when a change must wait for the learner's open check."""
 
 
 class _RecordConflict(Exception):
@@ -84,48 +102,214 @@ class SQLiteRecordStore:
     def __init__(
         self,
         path: DatabasePath,
-        curriculum: Curriculum,
         policy: TutorPolicy = POLICY_V1,
         *,
         clock: Clock | None = None,
         fresh: FreshSource | None = None,
     ) -> None:
         self._path = path
-        self._curriculum = curriculum
         self._policy = policy
         self._clock = SystemClock() if clock is None else clock
         self._fresh = SystemFreshSource() if fresh is None else fresh
         self._install_configuration()
 
-    def register(self, learner: LearnerId, display_name: str) -> Snapshot:
-        """Create a learner and their empty, not-yet-placed progress record."""
+    def register(self, learner: LearnerId, display_name: str) -> None:
+        """Create a learner who has not yet chosen what to learn."""
         if not display_name.strip():
             raise StoreError("learner display name must not be blank")
         connection = self._connection()
         try:
             connection.execute("BEGIN IMMEDIATE")
-            now = self._now()
             connection.execute(
                 "INSERT INTO learner (id, display_name, created_at) VALUES (?, ?, ?)",
-                (learner, display_name.strip(), now),
+                (learner, display_name.strip(), self._now()),
             )
+            connection.execute("COMMIT")
+            _LOG.info("learner record created learner=%s", learner)
+        except sqlite3.IntegrityError as error:
+            self._rollback(connection)
+            _LOG.info("returning learner recognized learner=%s", learner)
+            raise LearnerAlreadyRegistered(
+                "learner id is already registered"
+            ) from error
+        except sqlite3.DatabaseError as error:
+            self._rollback(connection)
+            _LOG.warning("learner record creation failed learner=%s", learner)
+            raise StoreError("could not register learner") from error
+        finally:
+            connection.close()
+
+    def adopt_curriculum(
+        self,
+        learner: LearnerId,
+        curriculum: Curriculum,
+        *,
+        title: str,
+        summary: str,
+    ) -> Snapshot:
+        """Save a curriculum and make it the learner's active course of study."""
+        if not title.strip():
+            raise StoreError("a curriculum needs a learner-facing title")
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            learner_row = connection.execute(
+                "SELECT id FROM learner WHERE id = ?", (learner,)
+            ).fetchone()
+            if learner_row is None:
+                raise LearnerNotFound(f"learner {learner!r} was not found")
+            open_row = connection.execute(
+                "SELECT id FROM checkpoint WHERE learner = ? AND status = 'open'",
+                (learner,),
+            ).fetchone()
+            if open_row is not None:
+                raise CheckInProgressError(
+                    "finish the current check before changing course"
+                )
+            now = self._now()
+            self._save_curriculum(connection, curriculum, title, summary, now)
             connection.execute(
                 """
                 INSERT INTO progress
                     (learner, curriculum_version, state_bits, placed, target_skill,
                      version, updated_at)
                 VALUES (?, ?, 0, 0, NULL, 0, ?)
+                ON CONFLICT (learner, curriculum_version) DO NOTHING
                 """,
-                (learner, self._curriculum.version, now),
+                (learner, curriculum.version, now),
+            )
+            connection.execute(
+                "UPDATE learner SET active_curriculum = ? WHERE id = ?",
+                (curriculum.version, learner),
             )
             snapshot = self._load_snapshot(connection, learner, None)
             connection.execute("COMMIT")
-            _LOG.info("learner record created learner=%s", learner)
+            _LOG.info(
+                "curriculum adopted learner=%s version=%s skills=%s",
+                learner,
+                curriculum.version,
+                len(curriculum.skills),
+            )
             return snapshot
+        except (LearnerNotFound, CheckInProgressError):
+            self._rollback(connection)
+            raise
         except sqlite3.DatabaseError as error:
             self._rollback(connection)
-            _LOG.warning("learner record creation failed learner=%s", learner)
-            raise StoreError("could not register learner") from error
+            _LOG.warning("curriculum adoption failed learner=%s", learner)
+            raise StoreError("could not adopt the curriculum") from error
+        finally:
+            connection.close()
+
+    def learner_topics(self, learner: LearnerId) -> ReturningLearner:
+        """Read one learner's continuable topics for their home session.
+
+        Time is O(topics for this learner); each row is one adopted
+        curriculum, so the result stays small without pagination.
+        """
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN")
+            learner_row = connection.execute(
+                "SELECT id, display_name, active_curriculum FROM learner WHERE id = ?",
+                (learner,),
+            ).fetchone()
+            if learner_row is None:
+                raise LearnerNotFound(f"learner {learner!r} was not found")
+            topic_rows = connection.execute(
+                """
+                SELECT p.curriculum_version, p.state_bits, c.title,
+                       (SELECT COUNT(*) FROM skill s
+                        WHERE s.curriculum_version = p.curriculum_version)
+                           AS skill_count
+                FROM progress p JOIN curriculum c
+                    ON c.version = p.curriculum_version
+                WHERE p.learner = ?
+                ORDER BY p.updated_at DESC, p.curriculum_version
+                """,
+                (learner,),
+            ).fetchall()
+            connection.execute("COMMIT")
+        except LearnerNotFound:
+            self._rollback(connection)
+            raise
+        except sqlite3.DatabaseError as error:
+            self._rollback(connection)
+            raise StoreError("could not read the learner's topics") from error
+        finally:
+            connection.close()
+        active_version = _optional_text(learner_row["active_curriculum"])
+        return ReturningLearner(
+            learner,
+            _text(learner_row["display_name"]),
+            tuple(
+                LearnerTopic(
+                    _text(row["curriculum_version"]),
+                    _text(row["title"]),
+                    _integer(row["state_bits"]).bit_count(),
+                    _integer(row["skill_count"]),
+                    active_version == _text(row["curriculum_version"]),
+                )
+                for row in topic_rows
+            ),
+        )
+
+    def switch_topic(self, learner: LearnerId, version: str) -> Snapshot:
+        """Make one previously adopted topic the learner's active course."""
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            learner_row = connection.execute(
+                "SELECT id FROM learner WHERE id = ?", (learner,)
+            ).fetchone()
+            if learner_row is None:
+                raise LearnerNotFound(f"learner {learner!r} was not found")
+            open_row = connection.execute(
+                "SELECT id FROM checkpoint WHERE learner = ? AND status = 'open'",
+                (learner,),
+            ).fetchone()
+            if open_row is not None:
+                raise CheckInProgressError(
+                    "finish the current check before changing course"
+                )
+            progress_row = connection.execute(
+                "SELECT curriculum_version FROM progress "
+                "WHERE learner = ? AND curriculum_version = ?",
+                (learner, version),
+            ).fetchone()
+            if progress_row is None:
+                raise TopicNotAdopted("that topic is not saved for this learner")
+            connection.execute(
+                "UPDATE learner SET active_curriculum = ? WHERE id = ?",
+                (version, learner),
+            )
+            snapshot = self._load_snapshot(connection, learner, None)
+            connection.execute("COMMIT")
+            _LOG.info("topic resumed learner=%s version=%s", learner, version)
+            return snapshot
+        except (LearnerNotFound, CheckInProgressError, TopicNotAdopted):
+            self._rollback(connection)
+            raise
+        except sqlite3.DatabaseError as error:
+            self._rollback(connection)
+            _LOG.warning("topic switch failed learner=%s", learner)
+            raise StoreError("could not switch to the requested topic") from error
+        finally:
+            connection.close()
+
+    def curriculum_display(self, version: str) -> CurriculumDisplay:
+        """Read the learner-facing title and summary of one saved curriculum."""
+        connection = self._connection()
+        try:
+            row = connection.execute(
+                "SELECT title, summary FROM curriculum WHERE version = ?",
+                (version,),
+            ).fetchone()
+            if row is None:
+                raise StoreError("the requested curriculum is not saved")
+            return CurriculumDisplay(_text(row["title"]), _text(row["summary"]))
+        except sqlite3.DatabaseError as error:
+            raise StoreError("could not read the curriculum description") from error
         finally:
             connection.close()
 
@@ -200,7 +384,13 @@ class SQLiteRecordStore:
                     )
                 now = self._now()
                 self._apply_plan(connection, snapshot, planned, now)
-                self._append_journal(connection, learner, planned, now)
+                self._append_journal(
+                    connection,
+                    learner,
+                    snapshot.progress.curriculum_version,
+                    planned,
+                    now,
+                )
                 committed = self._load_snapshot(connection, learner, None)
                 connection.execute("COMMIT")
                 _LOG.info(
@@ -257,10 +447,10 @@ class SQLiteRecordStore:
             rows = connection.execute(
                 """
                 SELECT payload FROM learning_journal
-                WHERE learner = ?
+                WHERE learner = ? AND curriculum_version = ?
                 ORDER BY rowid
                 """,
-                (learner,),
+                (learner, live.progress.curriculum_version),
             ).fetchall()
             plans = tuple(
                 _plan_from_payload(
@@ -281,6 +471,9 @@ class SQLiteRecordStore:
             )
             replayed = Journal.replay(initial, plans)
             connection.execute("COMMIT")
+        except CurriculumNotChosen:
+            self._rollback(connection)
+            return AuditResult(True, "no curriculum chosen yet")
         except (JournalCorruption, StoreError, sqlite3.DatabaseError) as error:
             self._rollback(connection)
             _LOG.warning("record audit failed learner=%s detail=%s", learner, error)
@@ -309,12 +502,15 @@ class SQLiteRecordStore:
                 JOIN answer AS a ON a.question_id = q.id
                 WHERE c.learner = ?
                   AND c.status <> 'open'
+                  AND c.curriculum_version = (
+                      SELECT active_curriculum FROM learner WHERE id = ?
+                  )
                   AND q.skill = ?
                   AND a.is_correct = 0
                 ORDER BY a.answered_at DESC, q.id DESC
                 LIMIT ?
                 """,
-                (learner, skill, limit),
+                (learner, learner, skill, limit),
             ).fetchall()
             mistakes = tuple(
                 ClosedMistake(
@@ -392,11 +588,20 @@ class SQLiteRecordStore:
             prepared: list[tuple[LearnerId, str, int, int, str | None, int]] = []
             for row in rows:
                 learner = learner_id(_text(row["id"]))
-                snapshot = self._load_snapshot(connection, learner, None)
+                try:
+                    snapshot = self._load_snapshot(connection, learner, None)
+                except CurriculumNotChosen:
+                    prepared.append(
+                        (learner, _text(row["display_name"]), 0, 0, None, 0)
+                    )
+                    continue
                 mapped = progress_map(snapshot.progress, snapshot.progress.curriculum)
                 evidence_row = connection.execute(
-                    "SELECT COUNT(*) AS count FROM learning_journal WHERE learner = ?",
-                    (learner,),
+                    """
+                    SELECT COUNT(*) AS count FROM learning_journal
+                    WHERE learner = ? AND curriculum_version = ?
+                    """,
+                    (learner, snapshot.progress.curriculum_version),
                 ).fetchone()
                 if evidence_row is None:
                     raise StoreError("could not count learner evidence")
@@ -449,7 +654,19 @@ class SQLiteRecordStore:
             ).fetchone()
             if learner_row is None:
                 raise LearnerNotFound(f"learner {learner!r} was not found")
-            snapshot = self._load_snapshot(connection, learner, None)
+            try:
+                snapshot = self._load_snapshot(connection, learner, None)
+            except CurriculumNotChosen:
+                connection.execute("COMMIT")
+                return TeacherLearnerDetail(
+                    learner,
+                    _text(learner_row["display_name"]),
+                    (),
+                    (),
+                    (),
+                    AuditResult(True, "no curriculum chosen yet"),
+                    (),
+                )
             mapped = progress_map(snapshot.progress, snapshot.progress.curriculum)
             claims = self._teacher_claims(connection, learner, snapshot)
             connection.execute("COMMIT")
@@ -478,10 +695,10 @@ class SQLiteRecordStore:
             """
             SELECT id, kind, target_skill, status, closed_at
             FROM checkpoint
-            WHERE learner = ? AND status <> 'open'
+            WHERE learner = ? AND status <> 'open' AND curriculum_version = ?
             ORDER BY closed_at DESC, id DESC
             """,
-            (learner,),
+            (learner, snapshot.progress.curriculum_version),
         ).fetchall()
         claims = [
             self._checkpoint_claim(connection, learner, snapshot, row)
@@ -492,9 +709,10 @@ class SQLiteRecordStore:
             SELECT payload, occurred_at
             FROM learning_journal
             WHERE learner = ? AND entry_type = 'OverrideMastery'
+              AND curriculum_version = ?
             ORDER BY occurred_at DESC, id DESC
             """,
-            (learner,),
+            (learner, snapshot.progress.curriculum_version),
         ).fetchall()
         claims.extend(
             _override_claim(snapshot, _text(row["payload"]), _text(row["occurred_at"]))
@@ -549,53 +767,61 @@ class SQLiteRecordStore:
         connection = self._connection()
         try:
             connection.execute("BEGIN IMMEDIATE")
-            now = self._now()
-            connection.execute(
-                """
-                INSERT OR IGNORE INTO curriculum (version, title, loaded_at)
-                VALUES (?, ?, ?)
-                """,
-                (self._curriculum.version, _CURRICULUM_TITLE, now),
-            )
-            for skill in self._curriculum.skills:
-                connection.execute(
-                    """
-                    INSERT OR IGNORE INTO skill
-                        (curriculum_version, code, bit_index, title, card, template)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        self._curriculum.version,
-                        skill.code,
-                        skill.bit_index,
-                        skill.title,
-                        skill.card,
-                        _template_payload(skill.template),
-                    ),
-                )
-            for skill, requirements in self._curriculum.requirements:
-                for required in requirements:
-                    connection.execute(
-                        """
-                        INSERT OR IGNORE INTO skill_requires
-                            (curriculum_version, skill, requires)
-                        VALUES (?, ?, ?)
-                        """,
-                        (self._curriculum.version, skill, required),
-                    )
             connection.execute(
                 """
                 INSERT OR IGNORE INTO policy (version, params, created_at)
                 VALUES (?, ?, ?)
                 """,
-                (self._policy.version, _policy_payload(self._policy), now),
+                (self._policy.version, _policy_payload(self._policy), self._now()),
             )
             connection.execute("COMMIT")
         except sqlite3.DatabaseError as error:
             self._rollback(connection)
-            raise StoreError("could not save curriculum configuration") from error
+            raise StoreError("could not save tutoring policy configuration") from error
         finally:
             connection.close()
+
+    @staticmethod
+    def _save_curriculum(
+        connection: sqlite3.Connection,
+        curriculum: Curriculum,
+        title: str,
+        summary: str,
+        now: str,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO curriculum (version, title, summary, loaded_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (curriculum.version, title.strip(), summary.strip(), now),
+        )
+        for skill in curriculum.skills:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO skill
+                    (curriculum_version, code, bit_index, title, card, template)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    curriculum.version,
+                    skill.code,
+                    skill.bit_index,
+                    skill.title,
+                    skill.card,
+                    _template_payload(skill.template),
+                ),
+            )
+        for skill_reference, requirements in curriculum.requirements:
+            for required in requirements:
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO skill_requires
+                        (curriculum_version, skill, requires)
+                    VALUES (?, ?, ?)
+                    """,
+                    (curriculum.version, skill_reference, required),
+                )
 
     def _connection(self) -> sqlite3.Connection:
         connection = open_database(self._path)
@@ -611,16 +837,26 @@ class SQLiteRecordStore:
         learner: LearnerId,
         fresh_checkpoint_id: CheckPointId | None,
     ) -> Snapshot:
+        learner_row = connection.execute(
+            "SELECT active_curriculum FROM learner WHERE id = ?", (learner,)
+        ).fetchone()
+        if learner_row is None:
+            raise LearnerNotFound(f"learner {learner!r} was not found")
+        active_version = learner_row["active_curriculum"]
+        if active_version is None:
+            raise CurriculumNotChosen(
+                f"learner {learner!r} has not chosen what to learn"
+            )
         row = connection.execute(
             """
             SELECT learner, curriculum_version, state_bits, placed, target_skill,
                    version
-            FROM progress WHERE learner = ?
+            FROM progress WHERE learner = ? AND curriculum_version = ?
             """,
-            (learner,),
+            (learner, _text(active_version)),
         ).fetchone()
         if row is None:
-            raise LearnerNotFound(f"learner {learner!r} was not found")
+            raise StoreError("the active curriculum has no learner progress row")
         curriculum = self._load_curriculum(connection, _text(row["curriculum_version"]))
         progress = Progress(
             learner_id(_text(row["learner"])),
@@ -805,8 +1041,8 @@ class SQLiteRecordStore:
                 """
                 INSERT INTO checkpoint
                     (id, learner, kind, target_skill, status, estimate, opened_at,
-                     closed_at)
-                VALUES (?, ?, ?, ?, 'open', NULL, ?, NULL)
+                     closed_at, curriculum_version)
+                VALUES (?, ?, ?, ?, 'open', NULL, ?, NULL, ?)
                 """,
                 (
                     checkpoint.identifier,
@@ -814,6 +1050,7 @@ class SQLiteRecordStore:
                     _checkpoint_kind_value(checkpoint.kind),
                     checkpoint.target,
                     now,
+                    snapshot.progress.curriculum_version,
                 ),
             )
         elif checkpoint.identifier != snapshot.checkpoint.identifier:
@@ -876,14 +1113,16 @@ class SQLiteRecordStore:
         self,
         connection: sqlite3.Connection,
         learner: LearnerId,
+        curriculum_version: str,
         plan: ActionPlan,
         now: str,
     ) -> None:
         connection.execute(
             """
             INSERT INTO learning_journal
-                (id, learner, entry_type, payload, prior_version, occurred_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (id, learner, entry_type, payload, prior_version, occurred_at,
+                 curriculum_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 self._fresh.journal_id(),
@@ -892,6 +1131,7 @@ class SQLiteRecordStore:
                 _plan_payload(plan),
                 plan.entry.prior_version,
                 now,
+                curriculum_version,
             ),
         )
 

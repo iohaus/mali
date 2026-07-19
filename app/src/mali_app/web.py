@@ -1,5 +1,6 @@
 """Server-rendered student and teacher surfaces for the local product."""
 
+import logging
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from json import dumps
@@ -38,9 +39,30 @@ from mali.rules import RefusalReason
 from mali.snapshot import Snapshot
 from mali.views import progress_map
 
+from mali_app.curriculum_author import (
+    AuthoredCurriculum,
+    CurriculumAuthor,
+    CurriculumBuildError,
+)
 from mali_app.instructor import InstructorEpisode, InstructorEvent
-from mali_app.store import LearnerNotFound, SQLiteRecordStore, StoreError
+from mali_app.store import (
+    CheckInProgressError,
+    CurriculumNotChosen,
+    LearnerAlreadyRegistered,
+    LearnerNotFound,
+    SQLiteRecordStore,
+    StoreError,
+    TopicNotAdopted,
+)
 from mali_app.store_types import ExecutionResult, ExecutionStatus
+
+_LOG = logging.getLogger(__name__)
+
+# The session cookie is a convenience pointer for this local, single-tenant
+# product, not a credential: its value is re-validated against the learner
+# record on every read, and it is only ever set by an explicit learner action.
+_SESSION_COOKIE = "mali_learner"
+_SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 
 _ASSET_ROOT = Path(__file__).parent
 _TEMPLATE_ROOT = _ASSET_ROOT / "templates"
@@ -62,22 +84,47 @@ def install_web_routes(
     store: SQLiteRecordStore,
     instructor: InstructorEpisode,
     question_prompt: Callable[[Snapshot, Question], str],
+    curriculum_author: CurriculumAuthor,
 ) -> None:
     """Attach Jinja, HTMX, and SSE routes to one configured application."""
     templates = Jinja2Templates(directory=str(_TEMPLATE_ROOT))
     app.mount("/static", StaticFiles(directory=str(_STATIC_ROOT)), name="static")
 
+    def _signed_in_redirect(learner: LearnerId) -> RedirectResponse:
+        response = RedirectResponse(f"/learners/{learner}", status_code=303)
+        response.set_cookie(
+            _SESSION_COOKIE,
+            str(learner),
+            max_age=_SESSION_MAX_AGE_SECONDS,
+            httponly=True,
+            samesite="lax",
+        )
+        return response
+
+    def _session_learner(request: Request) -> LearnerId | None:
+        return _learner_or_none(request.cookies.get(_SESSION_COOKIE, ""))
+
     def home(request: Request) -> HTMLResponse:
+        identifier = _session_learner(request)
+        if identifier is not None:
+            try:
+                returning = store.learner_topics(identifier)
+            except (LearnerNotFound, StoreError):
+                # A stale cookie (database reset, unknown learner) must not
+                # block registration; drop it and show the fresh-start page.
+                _LOG.info("home session cookie is stale; clearing it")
+                response = _render(templates, request, "home.html", {})
+                response.delete_cookie(_SESSION_COOKIE)
+                return response
+            return _render(templates, request, "home.html", {"returning": returning})
         return _render(templates, request, "home.html", {})
 
     async def register_student(request: Request) -> Response:
         form = await request.form()
         raw_learner = _form_text(form.get("learner_id"))
         display_name = _form_text(form.get("display_name"))
-        try:
-            learner = learner_id(raw_learner)
-            store.register(learner, display_name)
-        except (InvalidIdentifier, StoreError):
+
+        def rejected_registration() -> Response:
             return _render(
                 templates,
                 request,
@@ -85,14 +132,50 @@ def install_web_routes(
                 {"error": "Please choose a short learner ID and a display name."},
                 status_code=400,
             )
-        return RedirectResponse(f"/learners/{learner}", status_code=303)
+
+        try:
+            learner = learner_id(raw_learner)
+        except InvalidIdentifier:
+            return rejected_registration()
+        try:
+            store.register(learner, display_name)
+        except LearnerAlreadyRegistered:
+            return _signed_in_redirect(learner)
+        except StoreError:
+            return rejected_registration()
+        return _signed_in_redirect(learner)
+
+    def continue_topic(request: Request, learner: str, version: str) -> Response:
+        identifier = _learner_or_none(learner)
+        if identifier is None:
+            return _not_found(templates, request)
+        try:
+            store.switch_topic(identifier, version)
+        except CheckInProgressError:
+            # An open check is exactly where the learner left off; land there.
+            return _signed_in_redirect(identifier)
+        except (LearnerNotFound, TopicNotAdopted, StoreError):
+            return _not_found(templates, request)
+        return _signed_in_redirect(identifier)
+
+    def switch_learner() -> Response:
+        response = RedirectResponse("/", status_code=303)
+        response.delete_cookie(_SESSION_COOKIE)
+        return response
 
     def student_page(request: Request, learner: str) -> HTMLResponse:
         identifier = _learner_or_none(learner)
         if identifier is None:
             return _not_found(templates, request)
+        context: dict[str, object]
         try:
             context = _student_context(request, store, identifier, question_prompt)
+        except CurriculumNotChosen:
+            context = {
+                "request": request,
+                "learner": identifier,
+                "needs_topic": True,
+            }
         except (LearnerNotFound, StoreError):
             return _not_found(templates, request)
         return _render(templates, request, "student.html", context)
@@ -301,6 +384,28 @@ def install_web_routes(
             media_type="text/event-stream",
         )
 
+    def curriculum_stream(learner: str, topic: str = "") -> StreamingResponse:
+        """Build and adopt a curriculum whose scope is one learner URL."""
+        identifier = _learner_or_none(learner)
+        if identifier is None:
+            return StreamingResponse(
+                _curriculum_error_events("That learner could not be found."),
+                media_type="text/event-stream",
+            )
+        try:
+            store.snapshot(identifier)
+        except CurriculumNotChosen:
+            pass
+        except (LearnerNotFound, StoreError):
+            return StreamingResponse(
+                _curriculum_error_events("That learner could not be found."),
+                media_type="text/event-stream",
+            )
+        return StreamingResponse(
+            _curriculum_events(store, curriculum_author, identifier, topic),
+            media_type="text/event-stream",
+        )
+
     def teacher_dashboard(request: Request) -> HTMLResponse:
         try:
             learners = store.teacher_dashboard()
@@ -326,6 +431,12 @@ def install_web_routes(
 
     app.add_api_route("/", home, methods=["GET"], response_class=HTMLResponse)
     app.add_api_route("/learners", register_student, methods=["POST"])
+    app.add_api_route("/session/switch", switch_learner, methods=["POST"])
+    app.add_api_route(
+        "/learners/{learner}/topics/{version}",
+        continue_topic,
+        methods=["POST"],
+    )
     app.add_api_route(
         "/learners/{learner}",
         student_page,
@@ -342,6 +453,11 @@ def install_web_routes(
     app.add_api_route("/learners/{learner}/answers", submit_answer, methods=["POST"])
     app.add_api_route(
         "/learners/{learner}/lesson/stream", lesson_stream, methods=["GET"]
+    )
+    app.add_api_route(
+        "/learners/{learner}/curriculum/stream",
+        curriculum_stream,
+        methods=["GET"],
     )
     app.add_api_route("/teacher", teacher_dashboard, methods=["GET"])
     app.add_api_route("/teacher/{learner}", teacher_detail, methods=["GET"])
@@ -388,9 +504,24 @@ def _student_context(
     mapped = progress_map(current.progress, current.progress.curriculum)
     target = current.progress.target
     target_title = _skill_title(current, target) if target is not None else None
+    display = store.curriculum_display(current.progress.curriculum_version)
+    ready = current.progress.curriculum.next_up(current.progress.mask)
+    ready_codes = {skill.code for skill in ready}
+    later_skills = tuple(
+        (skill.code, skill.title)
+        for skill in current.progress.curriculum.skills
+        if not current.progress.mask & (1 << skill.bit_index)
+        and skill.code not in ready_codes
+    )
     return {
         "request": request,
         "learner": learner,
+        "needs_topic": False,
+        "curriculum_title": display.title,
+        "curriculum_summary": display.summary,
+        "can_rebuild": current.checkpoint is None,
+        "next_up_skills": tuple((skill.code, skill.title) for skill in ready),
+        "later_skills": later_skills,
         "question": question,
         "progress": mapped,
         "placed": current.progress.placed,
@@ -516,6 +647,84 @@ def _sse_events(events: Iterator[InstructorEvent]) -> Iterator[str]:
         if event.outcome is not None:
             payload["outcome"] = event.outcome.value
         yield f"data: {dumps(payload, separators=(',', ':'))}\n\n"
+
+
+def _curriculum_events(
+    store: SQLiteRecordStore,
+    author: CurriculumAuthor,
+    learner: LearnerId,
+    topic: str,
+) -> Iterator[str]:
+    """Stream honest pending state around one bounded authoring request."""
+    yield _named_sse_event(
+        "status", {"state": "building", "text": "Mali is designing your curriculum"}
+    )
+    try:
+        authored = author.build(learner, topic)
+        store.adopt_curriculum(
+            learner,
+            authored.curriculum,
+            title=authored.title,
+            summary=authored.summary,
+        )
+    except CurriculumBuildError as error:
+        yield _named_sse_event("status", {"state": "error", "text": str(error)})
+        yield _named_sse_event("outcome", {"outcome": "failed"})
+        return
+    except CheckInProgressError:
+        yield _named_sse_event(
+            "status",
+            {
+                "state": "error",
+                "text": "Finish the current check before changing course.",
+            },
+        )
+        yield _named_sse_event("outcome", {"outcome": "failed"})
+        return
+    except StoreError:
+        yield _named_sse_event(
+            "status",
+            {
+                "state": "error",
+                "text": "Mali could not save that curriculum. Please try again.",
+            },
+        )
+        yield _named_sse_event("outcome", {"outcome": "failed"})
+        return
+    yield _named_sse_event("curriculum", _curriculum_payload(authored))
+    yield _named_sse_event("outcome", {"outcome": "completed"})
+
+
+def _curriculum_error_events(text: str) -> Iterator[str]:
+    """Return a terminal named SSE event for a missing learner."""
+    yield _named_sse_event("status", {"state": "error", "text": text})
+    yield _named_sse_event("outcome", {"outcome": "failed"})
+
+
+def _curriculum_payload(authored: AuthoredCurriculum) -> dict[str, object]:
+    """Expose only the freshly adopted curriculum's display fields."""
+    return {
+        "topic": authored.topic,
+        "title": authored.title,
+        "summary": authored.summary,
+        "steps": [
+            {"title": skill.title, "description": _skill_summary(skill.card)}
+            for skill in authored.curriculum.skills
+        ],
+    }
+
+
+def _skill_summary(card: str) -> str:
+    """Take the teaching card's opening sentence for the build-time list."""
+    text = " ".join(card.split())
+    end = text.find(". ")
+    summary = text if end < 0 else text[: end + 1]
+    return summary if len(summary) <= 140 else f"{summary[:139]}…"
+
+
+def _named_sse_event(name: str, payload: dict[str, object]) -> str:
+    """Serialize one named event without mixing it into lesson text events."""
+    return f"event: {name}\ndata: {dumps(payload, separators=(',', ':'))}\n\n"
 
 
 def _static_events(text: str) -> Iterator[str]:

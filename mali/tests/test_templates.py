@@ -78,6 +78,44 @@ def test_template_refuses_invalid_variants_before_use() -> None:
         )
 
 
+def test_template_supports_remainder_and_whole_number_division() -> None:
+    template = QuestionTemplate(
+        parameters=(ParameterDomain("hour", tuple(range(13, 24))),),
+        key_expression="hour % 12",
+        plain_template="A clock read out loud: what hour name matches {hour}:00?",
+        answer_type=AnswerType.INTEGER,
+    )
+    grouped = QuestionTemplate(
+        parameters=(ParameterDomain("eggs", tuple(range(13, 25))),),
+        key_expression="eggs // 12",
+        plain_template="How many full cartons of 12 can you fill with {eggs} eggs?",
+        answer_type=AnswerType.INTEGER,
+    )
+
+    hour_instance = template.instance(7)
+    eggs_instance = grouped.instance(9)
+
+    hour = next(value for name, value in hour_instance.values if name == "hour")
+    eggs = next(value for name, value in eggs_instance.values if name == "eggs")
+    assert hour_instance.key == str(hour % 12)
+    assert eggs_instance.key == str(eggs // 12)
+
+
+def test_template_names_the_unsupported_operator() -> None:
+    with pytest.raises(InvalidTemplate, match="Pow"):
+        QuestionTemplate(
+            parameters=(
+                ParameterDomain(
+                    "side",
+                    tuple(range(2, 10)),
+                ),
+            ),
+            key_expression="side ** 2",
+            plain_template="What is the area of a square with side {side}?",
+            answer_type=AnswerType.INTEGER,
+        )
+
+
 def test_rendering_rejects_missing_values_and_revealed_answers() -> None:
     instance = _addition_template().instance(5)
 

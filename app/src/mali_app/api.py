@@ -25,14 +25,20 @@ from mali.snapshot import Snapshot
 from mali.views import progress_map
 from pydantic import BaseModel
 
+from mali_app.curriculum_author import CurriculumAuthor, CurriculumBuildError
 from mali_app.degradation import DegradationController, DegradationLevel
-from mali_app.demo import demo_curriculum
 from mali_app.instructor import InstructorEpisode, InstructorEvent
 from mali_app.item_writer import ItemWriter
 from mali_app.model_gateway import ModelGateway
 from mali_app.model_providers import create_model_gateway_from_environment
 from mali_app.schema import DatabasePath
-from mali_app.store import LearnerNotFound, SQLiteRecordStore, StoreError
+from mali_app.store import (
+    CheckInProgressError,
+    CurriculumNotChosen,
+    LearnerNotFound,
+    SQLiteRecordStore,
+    StoreError,
+)
 from mali_app.store_types import ExecutionResult, ExecutionStatus
 from mali_app.web import install_web_routes
 
@@ -80,6 +86,12 @@ class LessonRequest(BaseModel):
     student_turn: str = ""
 
 
+class CurriculumRequest(BaseModel):
+    """A learner's description of what they would like to learn."""
+
+    topic: str
+
+
 def create_app(
     database: DatabasePath = _DEFAULT_DATABASE,
     *,
@@ -89,9 +101,7 @@ def create_app(
     degradation: DegradationController | None = None,
 ) -> FastAPI:
     """Create the small FastAPI product surface backed by one SQLite file."""
-    if model_gateway is not None and not (enable_item_writer or enable_instructor):
-        raise ValueError("a model gateway requires an enabled model feature")
-    store = SQLiteRecordStore(database, demo_curriculum())
+    store = SQLiteRecordStore(database)
     controller = (
         DegradationController.from_environment() if degradation is None else degradation
     )
@@ -111,11 +121,14 @@ def create_app(
     instructor = (
         InstructorEpisode(store, gateway, controller) if enable_instructor else None
     )
+    curriculum_author = CurriculumAuthor(gateway)
     _LOG.info(
-        "application configured database=%s instructor=%s item_writer=%s level=%s",
+        "application configured database=%s instructor=%s item_writer=%s "
+        "curriculum_author=%s level=%s",
         database,
         enable_instructor,
         enable_item_writer,
+        gateway is not None,
         controller.level.value,
     )
     app = FastAPI(title="Mali", version="v1")
@@ -123,16 +136,62 @@ def create_app(
     def register(request: RegisterRequest) -> dict[str, object]:
         learner = _learner_or_error(request.learner_id)
         try:
-            snapshot = store.register(learner, request.display_name)
+            store.register(learner, request.display_name)
         except StoreError as error:
             raise _request_error(
                 status.HTTP_409_CONFLICT, "learner_exists", str(error)
             ) from error
-        return _progress_response(snapshot)
+        return _unstarted_response(learner)
 
     def get_progress(learner: str) -> dict[str, object]:
-        snapshot = _snapshot_or_error(store, learner)
+        identifier = _learner_or_error(learner)
+        try:
+            snapshot = store.snapshot(identifier)
+        except CurriculumNotChosen:
+            return _unstarted_response(identifier)
+        except LearnerNotFound as error:
+            raise _request_error(
+                status.HTTP_404_NOT_FOUND, "learner_not_found", "Learner not found."
+            ) from error
+        except StoreError as error:
+            raise _request_error(
+                status.HTTP_409_CONFLICT, "record_unavailable", str(error)
+            ) from error
         return _progress_response(snapshot)
+
+    def build_curriculum(learner: str, request: CurriculumRequest) -> dict[str, object]:
+        identifier = _learner_or_error(learner)
+        try:
+            authored = curriculum_author.build(identifier, request.topic)
+            snapshot = store.adopt_curriculum(
+                identifier,
+                authored.curriculum,
+                title=authored.title,
+                summary=authored.summary,
+            )
+        except CurriculumBuildError as error:
+            raise _request_error(
+                status.HTTP_409_CONFLICT, "curriculum_unavailable", str(error)
+            ) from error
+        except LearnerNotFound as error:
+            raise _request_error(
+                status.HTTP_404_NOT_FOUND, "learner_not_found", "Learner not found."
+            ) from error
+        except CheckInProgressError as error:
+            raise _request_error(
+                status.HTTP_409_CONFLICT,
+                "check_in_progress",
+                "Finish the current check before changing course.",
+            ) from error
+        except StoreError as error:
+            raise _request_error(
+                status.HTTP_409_CONFLICT, "record_unavailable", str(error)
+            ) from error
+        return {
+            "title": authored.title,
+            "summary": authored.summary,
+            "skills": [skill.title for skill in snapshot.progress.curriculum.skills],
+        }
 
     def start_placement(learner: str) -> dict[str, object]:
         identifier = _learner_or_error(learner)
@@ -240,6 +299,12 @@ def create_app(
     )
     app.add_api_route("/v1/learners/{learner}/progress", get_progress, methods=["GET"])
     app.add_api_route(
+        "/v1/learners/{learner}/curriculum",
+        build_curriculum,
+        methods=["POST"],
+        status_code=status.HTTP_201_CREATED,
+    )
+    app.add_api_route(
         "/v1/learners/{learner}/placement", start_placement, methods=["POST"]
     )
     app.add_api_route(
@@ -262,7 +327,9 @@ def create_app(
             return question.instance.text
         return _item_writer_prompt(snapshot, question, item_writer, controller)
 
-    install_web_routes(app, store, web_instructor, web_question_prompt)
+    install_web_routes(
+        app, store, web_instructor, web_question_prompt, curriculum_author
+    )
     return app
 
 
@@ -273,6 +340,12 @@ def _snapshot_or_error(store: SQLiteRecordStore, learner: str) -> Snapshot:
     except LearnerNotFound as error:
         raise _request_error(
             status.HTTP_404_NOT_FOUND, "learner_not_found", "Learner not found."
+        ) from error
+    except CurriculumNotChosen as error:
+        raise _request_error(
+            status.HTTP_409_CONFLICT,
+            "curriculum_required",
+            "Choose what you would like to learn first.",
         ) from error
     except StoreError as error:
         raise _request_error(
@@ -370,6 +443,18 @@ def _progress_response(snapshot: Snapshot) -> dict[str, object]:
         "mastered": mapped.mastered,
         "next_up": mapped.next_up,
         "later": mapped.later,
+    }
+
+
+def _unstarted_response(learner: LearnerId) -> dict[str, object]:
+    """Describe a learner who has not yet chosen what to learn."""
+    return {
+        "learner_id": learner,
+        "placed": False,
+        "current_skill": None,
+        "mastered": (),
+        "next_up": (),
+        "later": (),
     }
 
 

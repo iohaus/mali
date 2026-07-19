@@ -298,11 +298,15 @@ def _parse_expression(expression: str, names: set[str]) -> ast.Expression:
                 ast.Sub,
                 ast.Mult,
                 ast.Div,
+                ast.Mod,
+                ast.FloorDiv,
                 ast.USub,
                 ast.UAdd,
             ),
         ):
-            raise InvalidTemplate("expression uses unsupported syntax")
+            raise InvalidTemplate(
+                f"expression uses unsupported syntax: {type(node).__name__}"
+            )
     return parsed
 
 
@@ -328,10 +332,14 @@ def _evaluate(expression: str, values: dict[str, Fraction]) -> Fraction:
                 return left - right
             if isinstance(node.op, ast.Mult):
                 return left * right
-            if isinstance(node.op, ast.Div):
+            if isinstance(node.op, (ast.Div, ast.Mod, ast.FloorDiv)):
                 if not right:
                     raise InvalidTemplate("expression divides by zero")
-                return left / right
+                if isinstance(node.op, ast.Div):
+                    return left / right
+                if isinstance(node.op, ast.Mod):
+                    return left % right
+                return Fraction(left // right)
         raise InvalidTemplate("expression could not be evaluated")
 
     return visit(parsed.body)

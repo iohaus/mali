@@ -4,10 +4,43 @@
 
 {% block content %}
 <main class="welcome-shell">
+  {% if returning %}
+  <section class="welcome-card returning-card" aria-labelledby="returning-title">
+    <p class="eyebrow">Welcome back, {{ returning.display_name }}</p>
+    <h1 id="returning-title">Continue where you left off.</h1>
+    {% if returning.topics %}
+    <ul class="topic-list">
+      {% for topic in returning.topics %}
+      <li>
+        {% if topic.active %}
+        <a class="topic-link topic-active" href="/learners/{{ returning.learner }}">
+          <span class="topic-title">{{ topic.title }}</span>
+          <span class="topic-progress">{{ topic.mastered_count }} of {{ topic.skill_count }} skills</span>
+        </a>
+        {% else %}
+        <form action="/learners/{{ returning.learner }}/topics/{{ topic.curriculum_version }}" method="post" class="topic-form">
+          <button type="submit" class="topic-link">
+            <span class="topic-title">{{ topic.title }}</span>
+            <span class="topic-progress">{{ topic.mastered_count }} of {{ topic.skill_count }} skills</span>
+          </button>
+        </form>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="lede">You have not picked a topic yet.</p>
+    <a class="button-link" href="/learners/{{ returning.learner }}">Choose what to learn</a>
+    {% endif %}
+    <form action="/session/switch" method="post" class="switch-form">
+      <button type="submit" class="switch-link">Not {{ returning.display_name }}? Switch learner</button>
+    </form>
+  </section>
+  {% else %}
   <section class="welcome-card" aria-labelledby="welcome-title">
-    <p class="eyebrow">A thoughtful fraction tutor</p>
+    <p class="eyebrow">Your learning companion</p>
     <h1 id="welcome-title">Learn one solid step at a time.</h1>
-    <p class="lede">Mali helps you practise what you are ready for and keeps a clear record for your teacher.</p>
+    <p class="lede">Tell Mali what you would like to learn, then watch your personal learning path take shape.</p>
     {% if error %}<p class="notice notice-error" role="alert">{{ error }}</p>{% endif %}
     <form action="/learners" method="post" class="stacked-form">
       <label for="display_name">Your name</label>
@@ -17,5 +50,6 @@
       <button type="submit">Start with Mali</button>
     </form>
   </section>
+  {% endif %}
 </main>
 {% endblock %}

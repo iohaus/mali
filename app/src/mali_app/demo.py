@@ -15,11 +15,20 @@ from mali.policy import POLICY_V1
 from mali.snapshot import Snapshot
 from mali.templates import AnswerType, ParameterDomain, QuestionTemplate
 
-from mali_app.store import LearnerNotFound, SQLiteRecordStore, StoreError
+from mali_app.store import (
+    CurriculumNotChosen,
+    LearnerNotFound,
+    SQLiteRecordStore,
+    StoreError,
+)
 from mali_app.store_types import ExecutionResult, ExecutionStatus
 
 DEMO_LEARNER = learner_id("demo-learner")
 DEMO_LEARNER_NAME = "Mali demo learner"
+DEMO_CURRICULUM_TITLE = "Fraction foundations"
+DEMO_CURRICULUM_SUMMARY = (
+    "Build confidence with halves and quarters, one checked step at a time."
+)
 _DEMO_SKILL = skill_code("equal-halves")
 
 
@@ -72,7 +81,10 @@ def seed_demo(store: SQLiteRecordStore) -> Snapshot:
     try:
         snapshot = store.snapshot(DEMO_LEARNER)
     except LearnerNotFound:
-        snapshot = store.register(DEMO_LEARNER, DEMO_LEARNER_NAME)
+        store.register(DEMO_LEARNER, DEMO_LEARNER_NAME)
+        snapshot = _adopt_demo_curriculum(store)
+    except CurriculumNotChosen:
+        snapshot = _adopt_demo_curriculum(store)
     if not snapshot.progress.placed:
         _committed(store.execute(DEMO_LEARNER, StartPlacement(), Actor.ENGINE))
         _complete_open_checkpoint(store)
@@ -89,6 +101,15 @@ def seed_demo(store: SQLiteRecordStore) -> Snapshot:
         _complete_open_checkpoint(store)
         snapshot = _run_engine(store)
     return snapshot
+
+
+def _adopt_demo_curriculum(store: SQLiteRecordStore) -> Snapshot:
+    return store.adopt_curriculum(
+        DEMO_LEARNER,
+        demo_curriculum(),
+        title=DEMO_CURRICULUM_TITLE,
+        summary=DEMO_CURRICULUM_SUMMARY,
+    )
 
 
 def _complete_open_checkpoint(store: SQLiteRecordStore) -> None:

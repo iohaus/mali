@@ -69,7 +69,24 @@ input:focus { outline: 3px solid #b4dfc8; outline-offset: 1px; }
 .site-header nav a { color: var(--muted); text-decoration: none; }
 .site-header nav a:hover { color: var(--green); }
 
-.welcome-shell { display: grid; min-height: calc(100vh - 82px); place-items: center; padding: 2rem 1.5rem 5rem; }
+.welcome-shell { display: grid; min-height: calc(100vh - 82px); place-items: center; align-content: center; gap: 1.5rem; padding: 2rem 1.5rem 5rem; }
+.topic-list { display: grid; gap: .45rem; margin: 1.4rem 0 0; padding: 0; list-style: none; }
+.topic-form { margin: 0; }
+.topic-link {
+  display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 1rem;
+  padding: .65rem .9rem; border: 1px solid var(--line); border-radius: .75rem;
+  background: var(--panel); color: var(--ink); text-align: left; text-decoration: none; cursor: pointer;
+}
+.topic-link:hover { border-color: var(--green); background: var(--green-soft); color: var(--ink); }
+.topic-link.topic-active { border-color: var(--green); background: var(--green-soft); }
+.topic-title { font-weight: 700; }
+.topic-progress { margin: 0; color: var(--muted); font-size: .85rem; white-space: nowrap; }
+.switch-form { margin-top: 1.6rem; }
+.switch-link {
+  padding: 0; border: none; background: none; color: var(--muted);
+  font-size: .85rem; text-decoration: underline; cursor: pointer;
+}
+.switch-link:hover { background: none; color: var(--green); }
 .welcome-card, .empty-card { width: min(100%, 600px); padding: clamp(1.7rem, 5vw, 3.4rem); border: 1px solid var(--line); border-radius: 1.25rem; background: var(--panel); box-shadow: var(--shadow); }
 .welcome-card h1, .teacher-heading h1 { margin: .35rem 0 .8rem; font-family: Georgia, serif; font-size: clamp(2.25rem, 6vw, 4.2rem); line-height: 1.04; }
 .lede { max-width: 640px; color: var(--muted); font-size: 1.07rem; }
@@ -78,8 +95,9 @@ input:focus { outline: 3px solid #b4dfc8; outline-offset: 1px; }
 .stacked-form label { margin-top: .6rem; font-weight: 700; }
 .stacked-form button { margin-top: 1.1rem; }
 
-.student-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(260px, .65fr); grid-template-areas: "chat map" "practice map"; gap: 1.25rem; max-width: 1180px; margin: 0 auto; padding: 1rem 1.5rem 4rem; }
-.conversation-card, .progress-card, .practice-card, .teacher-table, .teacher-map, .claim-card { border: 1px solid var(--line); border-radius: 1.1rem; background: var(--panel); box-shadow: var(--shadow); }
+.student-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(260px, .65fr); grid-template-areas: "path path" "chat map" "practice map"; gap: 1.25rem; max-width: 1180px; margin: 0 auto; padding: 1rem 1.5rem 4rem; }
+.conversation-card, .curriculum-card, .progress-card, .practice-card, .teacher-table, .teacher-map, .claim-card { border: 1px solid var(--line); border-radius: 1.1rem; background: var(--panel); box-shadow: var(--shadow); }
+.curriculum-card { grid-area: path; padding: 1.5rem; }
 .conversation-card { grid-area: chat; padding: 1.5rem; }
 .progress-card { grid-area: map; padding: 1.5rem; }
 .practice-card { grid-area: practice; padding: 1.5rem; }
@@ -94,6 +112,35 @@ input:focus { outline: 3px solid #b4dfc8; outline-offset: 1px; }
 .lesson-form { display: flex; gap: .6rem; }
 .lesson-form input { min-width: 0; }
 .lesson-form button { flex: 0 0 auto; }
+.processing-message { display: flex; align-items: center; gap: .45rem; width: fit-content; }
+.processing-message p { display: inline; }
+.processing-dots { display: inline-flex; align-items: center; gap: .2rem; height: 1rem; margin-left: .2rem; vertical-align: middle; }
+.processing-dots span { width: .38rem; height: .38rem; border-radius: 50%; background: var(--green); animation: processing-bounce 1s ease-in-out infinite; }
+.processing-dots span:nth-child(2) { animation-delay: .15s; }
+.processing-dots span:nth-child(3) { animation-delay: .3s; }
+.processing-status { display: flex; align-items: center; width: fit-content; margin-top: .9rem; color: var(--muted); font-size: .92rem; }
+@keyframes processing-bounce { 0%, 60%, 100% { opacity: .35; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-.22rem); } }
+
+.curriculum-summary { margin: .8rem 0 1.2rem; }
+.curriculum-form { display: flex; gap: .6rem; max-width: 720px; }
+.curriculum-form input { min-width: 0; }
+.curriculum-form button { flex: 0 0 auto; }
+.curriculum-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .75rem; margin: 0 0 1.25rem; padding: 0; list-style: none; counter-reset: path; }
+.curriculum-steps li { display: grid; grid-template-columns: auto 1fr; gap: .7rem; align-items: start; min-height: 6.8rem; padding: 1rem; border: 1px solid var(--line); border-radius: .85rem; background: #fbfdfb; animation: step-arrive .38s ease both; }
+.curriculum-steps li:nth-child(2) { animation-delay: .08s; }
+.curriculum-steps li:nth-child(3) { animation-delay: .16s; }
+.curriculum-steps li:nth-child(4) { animation-delay: .24s; }
+.curriculum-steps li:nth-child(5) { animation-delay: .32s; }
+.curriculum-steps li:nth-child(6) { animation-delay: .4s; }
+.curriculum-steps li:nth-child(7) { animation-delay: .48s; }
+.path-number { display: grid; width: 1.65rem; height: 1.65rem; place-items: center; border-radius: 50%; color: #fff; background: var(--green); font-size: .82rem; font-weight: 800; }
+.curriculum-steps strong { display: block; line-height: 1.2; }
+.curriculum-steps p { margin: .35rem 0 0; color: var(--muted); font-size: .9rem; }
+@keyframes step-arrive { from { opacity: 0; transform: translateY(.45rem); } to { opacity: 1; transform: translateY(0); } }
+.student-layout-single { grid-template-columns: 1fr; grid-template-areas: "path"; max-width: 880px; }
+.curriculum-card-hero { padding: 2rem; }
+.curriculum-card-hero .curriculum-steps { margin-top: 1.2rem; }
+.curriculum-start { margin-top: 1.1rem; }
 
 .progress-card h2, .practice-card h2, .claims h2 { margin: .35rem 0 1rem; font-size: 1.35rem; }
 .map-group { margin-top: 1.3rem; }
@@ -146,10 +193,16 @@ input:focus { outline: 3px solid #b4dfc8; outline-offset: 1px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
 
 @media (max-width: 760px) {
-  .student-layout { grid-template-columns: 1fr; grid-template-areas: "chat" "practice" "map"; padding: .5rem 1rem 3rem; }
+  .student-layout { grid-template-columns: 1fr; grid-template-areas: "path" "chat" "practice" "map"; padding: .5rem 1rem 3rem; }
+  .curriculum-form, .lesson-form { flex-direction: column; }
+  .curriculum-form button, .lesson-form button { width: 100%; }
   .site-header { padding: 1rem; }
   .teacher-shell { padding: 1.2rem 1rem 3rem; }
   .teacher-map, .evidence-row dl { grid-template-columns: 1fr; }
   .table-row { grid-template-columns: 1.5fr .6fr .6fr; gap: .6rem; }
   .table-row span:nth-child(4), .table-row span:nth-child(5) { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .processing-dots span, .curriculum-steps li { animation: none; }
 }

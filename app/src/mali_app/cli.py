@@ -8,7 +8,7 @@ import uvicorn
 from mali.ids import learner_id
 
 from mali_app.api import create_app
-from mali_app.demo import demo_curriculum, seed_demo
+from mali_app.demo import seed_demo
 from mali_app.logging_setup import configure_console_logging
 from mali_app.model_gateway import GatewayConfigurationError, ModelGateway
 from mali_app.model_providers import create_model_gateway_from_environment
@@ -23,7 +23,7 @@ def run(arguments: Sequence[str] | None = None) -> int:
     parser = _parser()
     parsed = parser.parse_args(arguments)
     if parsed.command == "demo-seed":
-        store = SQLiteRecordStore(parsed.database, demo_curriculum())
+        store = SQLiteRecordStore(parsed.database)
         snapshot = seed_demo(store)
         print(
             f"seeded {snapshot.progress.learner}: "
@@ -31,7 +31,7 @@ def run(arguments: Sequence[str] | None = None) -> int:
         )
         return 0
     if parsed.command == "audit":
-        store = SQLiteRecordStore(parsed.database, demo_curriculum())
+        store = SQLiteRecordStore(parsed.database)
         try:
             result = store.audit(learner_id(parsed.learner))
         except (LearnerNotFound, StoreError) as error:

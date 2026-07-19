@@ -215,11 +215,7 @@ class OpenAIModelGateway:
                     error,
                     retryable,
                 )
-                if (
-                    emitted
-                    or not retryable
-                    or attempt == self._retry_attempts - 1
-                ):
+                if emitted or not retryable or attempt == self._retry_attempts - 1:
                     raise gateway_error from error
 
     def structured[ResultT: BaseModel](

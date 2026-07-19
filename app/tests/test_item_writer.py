@@ -25,9 +25,7 @@ from mali_app.model_gateway import (
 class ScriptedFixtureGateway:
     identity = ModelIdentity("fixture", "item-writer")
 
-    def __init__(
-        self, responses: list[ItemWriterResponse | GatewayError]
-    ) -> None:
+    def __init__(self, responses: list[ItemWriterResponse | GatewayError]) -> None:
         self.responses = responses
         self.request_inputs: list[str] = []
 

@@ -66,6 +66,34 @@ class TeachingTrace:
 
 
 @dataclass(frozen=True, slots=True)
+class CurriculumDisplay:
+    """The learner-facing name and promise of one saved curriculum."""
+
+    title: str
+    summary: str
+
+
+@dataclass(frozen=True, slots=True)
+class LearnerTopic:
+    """One adopted topic a learner can return to from the home page."""
+
+    curriculum_version: str
+    title: str
+    mastered_count: int
+    skill_count: int
+    active: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ReturningLearner:
+    """One registered learner and the topics they can continue."""
+
+    learner: LearnerId
+    display_name: str
+    topics: tuple[LearnerTopic, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class TeacherLearnerSummary:
     """One learner row prepared for the teacher dashboard."""
 
