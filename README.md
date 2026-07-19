@@ -65,11 +65,10 @@ uv run mali serve
 | Variable | Purpose | Default |
 |---|---|---|
 | `OPENAI_API_KEY` | credential for the default OpenAI provider | — |
-| `MALI_MODEL_PROVIDER` | `openai` or `qwen` | `openai` |
-| `MALI_MODEL` | model override | `gpt-5.6` (openai), `qwen3.6-flash` (qwen) |
+| `MALI_MODEL_PROVIDER` | `openai` | `openai` |
+| `MALI_MODEL` | model override | `gpt-5.6` |
 | `MALI_MODEL_BASE_URL` | endpoint override (absolute http/https URL) | provider default |
 | `MALI_MODEL_API_KEY` | provider-neutral credential override | — |
-| `DASHSCOPE_API_KEY` | credential when `MALI_MODEL_PROVIDER=qwen` | — |
 
 Variables must be **exported in the shell** — the app reads the process environment and does not
 load `.env` files.
