@@ -76,6 +76,15 @@ class ItemWriter:
                 gateway_failed = gateway_failed or isinstance(
                     error, (GatewayTimeout, GatewayUnavailable)
                 )
+                if gateway_failed:
+                    rejection_reasons.append(reason)
+                    return ItemWriterResult(
+                        instance.text,
+                        attempt,
+                        True,
+                        True,
+                        tuple(rejection_reasons),
+                    )
             except RenderingRejected as error:
                 reason = error.reason
             else:

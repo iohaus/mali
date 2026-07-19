@@ -1,7 +1,10 @@
 """Explicit normal and degraded modes for model-facing product flows."""
 
+import logging
 from enum import StrEnum
 from os import environ
+
+_LOG = logging.getLogger(__name__)
 
 
 class DegradationLevel(StrEnum):
@@ -19,6 +22,11 @@ class DegradationController:
         self._pinned = pinned
         self._level = DegradationLevel.NORMAL if pinned is None else pinned
         self._writer_fallback_checkpoints: set[str] = set()
+        _LOG.debug(
+            "model degradation initialized level=%s pinned=%s",
+            self._level,
+            pinned is not None,
+        )
 
     @classmethod
     def from_environment(cls) -> "DegradationController":
@@ -59,12 +67,20 @@ class DegradationController:
             return
         if gateway_failed:
             self._level = DegradationLevel.STATIC
+            _LOG.warning(
+                "question rendering switched to static mode after gateway failure"
+            )
         elif used_fallback:
             self._level = DegradationLevel.ITEM_WRITER_FALLBACK
             if checkpoint_id is not None:
                 self._writer_fallback_checkpoints.add(checkpoint_id)
+            _LOG.warning(
+                "question rendering switched to checkpoint fallback checkpoint=%s",
+                checkpoint_id,
+            )
 
     def report_gateway_failure(self) -> None:
         """Trip all model use to static content after a gateway failure."""
         if self._pinned is None:
             self._level = DegradationLevel.STATIC
+            _LOG.warning("teaching switched to static mode after gateway failure")

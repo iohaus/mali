@@ -1,6 +1,7 @@
 """Mechanical checks that keep the tutoring core predictable."""
 
 import ast
+import re
 import sys
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import pytest
 CORE_ROOT = Path(__file__).parents[1] / "src" / "mali"
 REPOSITORY_ROOT = CORE_ROOT.parents[2]
 PROMPT_ROOT = REPOSITORY_ROOT / "app" / "src" / "mali_app" / "prompts"
+UI_ROOT = REPOSITORY_ROOT / "app" / "src" / "mali_app"
 BANNED_CORE_MODULES = frozenset(
     {
         "asyncio",
@@ -41,6 +43,17 @@ FORBIDDEN_REPOSITORY_TERMS = (
     "quasi-ordinal",
     "surmise",
     "well-graded",
+)
+FORBIDDEN_PRODUCT_TERMS = (
+    "agent",
+    "item",
+    "guard",
+    "transition",
+    "structure",
+    "knowledge state",
+    "fringe",
+    "estimate",
+    "posterior",
 )
 
 
@@ -112,3 +125,30 @@ def test_public_text_uses_product_vocabulary(term: str) -> None:
         if term in path.read_text(encoding="utf-8").lower()
     ]
     assert not violations, f"reserved term {term!r} in: {violations}"
+
+
+def _ui_copy_sources() -> tuple[tuple[Path, str], ...]:
+    assets = tuple(
+        (path, path.read_text(encoding="utf-8"))
+        for directory in (UI_ROOT / "templates", UI_ROOT / "static")
+        for path in sorted(directory.rglob("*"))
+        if path.is_file()
+    )
+    source = UI_ROOT / "web.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    literals = "\n".join(
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    )
+    return (*assets, (source, literals))
+
+
+@pytest.mark.parametrize("term", FORBIDDEN_PRODUCT_TERMS)
+def test_student_and_teacher_copy_uses_only_learning_vocabulary(term: str) -> None:
+    violations = [
+        path
+        for path, text in _ui_copy_sources()
+        if re.search(rf"\b{re.escape(term)}\b", text, flags=re.IGNORECASE)
+    ]
+    assert not violations, f"product term {term!r} in: {violations}"

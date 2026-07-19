@@ -1,6 +1,7 @@
 """SQLite implementation of the application's durable learner-record port."""
 
 import json
+import logging
 import sqlite3
 from dataclasses import fields
 from fractions import Fraction
@@ -44,7 +45,7 @@ from mali.templates import (
     QuestionInstance,
     QuestionTemplate,
 )
-from mali.views import ClosedMistake
+from mali.views import ClosedMistake, progress_map
 
 from mali_app.clock import Clock, SystemClock, as_storage_time
 from mali_app.fresh import FreshSource, SystemFreshSource
@@ -53,11 +54,16 @@ from mali_app.store_types import (
     AuditResult,
     ExecutionResult,
     ExecutionStatus,
+    LearningClaim,
+    QuestionEvidence,
+    TeacherLearnerDetail,
+    TeacherLearnerSummary,
     TeachingTrace,
 )
 
 _MAX_EXECUTION_ATTEMPTS = 2
 _CURRICULUM_TITLE = "Mali curriculum"
+_LOG = logging.getLogger(__name__)
 
 
 class StoreError(Exception):
@@ -114,9 +120,11 @@ class SQLiteRecordStore:
             )
             snapshot = self._load_snapshot(connection, learner, None)
             connection.execute("COMMIT")
+            _LOG.info("learner record created learner=%s", learner)
             return snapshot
         except sqlite3.DatabaseError as error:
             self._rollback(connection)
+            _LOG.warning("learner record creation failed learner=%s", learner)
             raise StoreError("could not register learner") from error
         finally:
             connection.close()
@@ -147,6 +155,14 @@ class SQLiteRecordStore:
         for _ in range(_MAX_EXECUTION_ATTEMPTS):
             connection = self._connection()
             try:
+                _LOG.debug(
+                    "record action requested learner=%s action=%s actor=%s "
+                    "expected_version=%s",
+                    learner,
+                    type(action).__name__,
+                    actor.value,
+                    expected_version,
+                )
                 connection.execute("BEGIN IMMEDIATE")
                 checkpoint_identifier = (
                     self._fresh.checkpoint_id()
@@ -161,10 +177,22 @@ class SQLiteRecordStore:
                     and snapshot.progress.version != expected_version
                 ):
                     self._rollback(connection)
+                    _LOG.info(
+                        "record action stale learner=%s action=%s expected_version=%s",
+                        learner,
+                        type(action).__name__,
+                        expected_version,
+                    )
                     return ExecutionResult(ExecutionStatus.STALE_RECORD, None)
                 planned = TutorDesk.plan(action, snapshot, actor)
                 if isinstance(planned, Refused):
                     self._rollback(connection)
+                    _LOG.info(
+                        "record action refused learner=%s action=%s reason=%s",
+                        learner,
+                        type(action).__name__,
+                        planned.reason.value,
+                    )
                     return ExecutionResult(
                         ExecutionStatus.REFUSED,
                         snapshot,
@@ -175,18 +203,49 @@ class SQLiteRecordStore:
                 self._append_journal(connection, learner, planned, now)
                 committed = self._load_snapshot(connection, learner, None)
                 connection.execute("COMMIT")
+                _LOG.info(
+                    "record action committed learner=%s action=%s version=%s",
+                    learner,
+                    type(action).__name__,
+                    committed.progress.version,
+                )
                 return ExecutionResult(ExecutionStatus.COMMITTED, committed, planned)
             except _RecordConflict:
                 self._rollback(connection)
+                _LOG.debug(
+                    "record action conflict learner=%s action=%s",
+                    learner,
+                    type(action).__name__,
+                )
             except sqlite3.OperationalError as error:
                 self._rollback(connection)
                 if "locked" not in str(error).lower():
+                    _LOG.exception(
+                        "record action database error learner=%s action=%s",
+                        learner,
+                        type(action).__name__,
+                    )
                     raise StoreError("could not update learner record") from error
+                _LOG.debug(
+                    "record action locked; retrying learner=%s action=%s",
+                    learner,
+                    type(action).__name__,
+                )
             except sqlite3.DatabaseError as error:
                 self._rollback(connection)
+                _LOG.exception(
+                    "record action database error learner=%s action=%s",
+                    learner,
+                    type(action).__name__,
+                )
                 raise StoreError("could not update learner record") from error
             finally:
                 connection.close()
+        _LOG.warning(
+            "record action exhausted retries learner=%s action=%s",
+            learner,
+            type(action).__name__,
+        )
         return ExecutionResult(ExecutionStatus.STALE_RECORD, None)
 
     def audit(self, learner: LearnerId) -> AuditResult:
@@ -224,11 +283,14 @@ class SQLiteRecordStore:
             connection.execute("COMMIT")
         except (JournalCorruption, StoreError, sqlite3.DatabaseError) as error:
             self._rollback(connection)
+            _LOG.warning("record audit failed learner=%s detail=%s", learner, error)
             return AuditResult(False, f"audit could not read the journal: {error}")
         finally:
             connection.close()
         if _same_progress(replayed, live.progress):
+            _LOG.info("record audit passed learner=%s", learner)
             return AuditResult(True, "journal agrees with current progress")
+        _LOG.warning("record audit mismatch learner=%s", learner)
         return AuditResult(False, "journal does not agree with current progress")
 
     def recent_mistakes(
@@ -262,6 +324,12 @@ class SQLiteRecordStore:
                     _text(row["answer_key"]),
                 )
                 for row in rows
+            )
+            _LOG.debug(
+                "loaded closed mistakes learner=%s skill=%s count=%s",
+                learner,
+                skill,
+                len(mistakes),
             )
             return tuple(reversed(mistakes))
         except sqlite3.DatabaseError as error:
@@ -298,11 +366,184 @@ class SQLiteRecordStore:
                 ),
             )
             connection.execute("COMMIT")
+            _LOG.debug(
+                "teaching trace saved learner=%s episode=%s model=%s "
+                "outcome=%s tokens_out=%s",
+                trace.learner,
+                trace.episode_id,
+                trace.model,
+                trace.episode_outcome,
+                trace.tokens_out,
+            )
         except sqlite3.DatabaseError as error:
             self._rollback(connection)
             raise StoreError("could not save teaching trace") from error
         finally:
             connection.close()
+
+    def teacher_dashboard(self) -> tuple[TeacherLearnerSummary, ...]:
+        """Read concise learner summaries for the teacher dashboard."""
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN")
+            rows = connection.execute(
+                "SELECT id, display_name FROM learner ORDER BY display_name, id"
+            ).fetchall()
+            prepared: list[tuple[LearnerId, str, int, int, str | None, int]] = []
+            for row in rows:
+                learner = learner_id(_text(row["id"]))
+                snapshot = self._load_snapshot(connection, learner, None)
+                mapped = progress_map(snapshot.progress, snapshot.progress.curriculum)
+                evidence_row = connection.execute(
+                    "SELECT COUNT(*) AS count FROM learning_journal WHERE learner = ?",
+                    (learner,),
+                ).fetchone()
+                if evidence_row is None:
+                    raise StoreError("could not count learner evidence")
+                current_title = _skill_title(
+                    snapshot.progress.curriculum, snapshot.progress.target
+                )
+                prepared.append(
+                    (
+                        learner,
+                        _text(row["display_name"]),
+                        len(mapped.mastered),
+                        len(mapped.next_up),
+                        current_title,
+                        _integer(evidence_row["count"]),
+                    )
+                )
+            connection.execute("COMMIT")
+        except (StoreError, sqlite3.DatabaseError) as error:
+            self._rollback(connection)
+            raise StoreError("could not read teacher dashboard") from error
+        finally:
+            connection.close()
+        return tuple(
+            TeacherLearnerSummary(
+                learner,
+                display_name,
+                mastered_count,
+                ready_count,
+                current_title,
+                evidence_count,
+                self.audit(learner).valid,
+            )
+            for (
+                learner,
+                display_name,
+                mastered_count,
+                ready_count,
+                current_title,
+                evidence_count,
+            ) in prepared
+        )
+
+    def teacher_detail(self, learner: LearnerId) -> TeacherLearnerDetail:
+        """Read one learner's claims and supporting question evidence."""
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN")
+            learner_row = connection.execute(
+                "SELECT display_name FROM learner WHERE id = ?", (learner,)
+            ).fetchone()
+            if learner_row is None:
+                raise LearnerNotFound(f"learner {learner!r} was not found")
+            snapshot = self._load_snapshot(connection, learner, None)
+            mapped = progress_map(snapshot.progress, snapshot.progress.curriculum)
+            claims = self._teacher_claims(connection, learner, snapshot)
+            connection.execute("COMMIT")
+        except LearnerNotFound:
+            self._rollback(connection)
+            raise
+        except (StoreError, sqlite3.DatabaseError) as error:
+            self._rollback(connection)
+            raise StoreError("could not read teacher evidence") from error
+        finally:
+            connection.close()
+        return TeacherLearnerDetail(
+            learner,
+            _text(learner_row["display_name"]),
+            mapped.mastered,
+            mapped.next_up,
+            mapped.later,
+            self.audit(learner),
+            claims,
+        )
+
+    def _teacher_claims(
+        self, connection: sqlite3.Connection, learner: LearnerId, snapshot: Snapshot
+    ) -> tuple[LearningClaim, ...]:
+        checkpoint_rows = connection.execute(
+            """
+            SELECT id, kind, target_skill, status, closed_at
+            FROM checkpoint
+            WHERE learner = ? AND status <> 'open'
+            ORDER BY closed_at DESC, id DESC
+            """,
+            (learner,),
+        ).fetchall()
+        claims = [
+            self._checkpoint_claim(connection, learner, snapshot, row)
+            for row in checkpoint_rows
+        ]
+        override_rows = connection.execute(
+            """
+            SELECT payload, occurred_at
+            FROM learning_journal
+            WHERE learner = ? AND entry_type = 'OverrideMastery'
+            ORDER BY occurred_at DESC, id DESC
+            """,
+            (learner,),
+        ).fetchall()
+        claims.extend(
+            _override_claim(snapshot, _text(row["payload"]), _text(row["occurred_at"]))
+            for row in override_rows
+        )
+        return tuple(sorted(claims, key=lambda claim: claim.occurred_at, reverse=True))
+
+    def _checkpoint_claim(
+        self,
+        connection: sqlite3.Connection,
+        learner: LearnerId,
+        snapshot: Snapshot,
+        row: sqlite3.Row,
+    ) -> LearningClaim:
+        checkpoint = _text(row["id"])
+        kind = _text(row["kind"])
+        status_value = _text(row["status"])
+        occurred_at = _text(row["closed_at"])
+        title = _skill_title(
+            snapshot.progress.curriculum, _optional_skill(row["target_skill"])
+        )
+        heading, detail, action_types = _claim_copy(kind, status_value, title)
+        questions = tuple(
+            QuestionEvidence(
+                _text(_mapping(_decoded(_text(question["params"])))["text"]),
+                _optional_text(question["given"]),
+                None
+                if question["is_correct"] is None
+                else _integer(question["is_correct"]) == 1,
+                _optional_text(question["answered_at"]),
+            )
+            for question in connection.execute(
+                """
+                SELECT q.params, a.given, a.is_correct, a.answered_at
+                FROM question AS q
+                LEFT JOIN answer AS a ON a.question_id = q.id
+                WHERE q.checkpoint_id = ?
+                ORDER BY q.asked_at, q.id
+                """,
+                (checkpoint,),
+            ).fetchall()
+        )
+        return LearningClaim(
+            heading,
+            detail,
+            occurred_at,
+            _claim_attribution(connection, learner, action_types, occurred_at),
+            questions,
+        )
 
     def _install_configuration(self) -> None:
         connection = self._connection()
@@ -658,6 +899,92 @@ class SQLiteRecordStore:
     def _rollback(connection: sqlite3.Connection) -> None:
         if connection.in_transaction:
             connection.execute("ROLLBACK")
+
+
+def _skill_title(curriculum: Curriculum, code: SkillCode | None) -> str | None:
+    if code is None:
+        return None
+    try:
+        return next(skill.title for skill in curriculum.skills if skill.code == code)
+    except StopIteration as error:
+        raise StoreError("saved record references an unknown skill") from error
+
+
+def _claim_copy(
+    kind: str, status: str, title: str | None
+) -> tuple[str, str, tuple[str, ...]]:
+    if kind == "placement" and status == "certified":
+        return (
+            "Starting map",
+            "A short check set this learner's starting point.",
+            ("CertifyPlacement",),
+        )
+    if title is None:
+        raise StoreError("a completed skill check needs a skill title")
+    if status == "passed":
+        return (
+            f"Mastered {title}",
+            "The completed check supports this achievement.",
+            ("PassCheck",),
+        )
+    return (
+        f"Practice continues for {title}",
+        "This check shows where more practice will help.",
+        ("FailCheck", "CloseStale"),
+    )
+
+
+def _claim_attribution(
+    connection: sqlite3.Connection,
+    learner: LearnerId,
+    action_types: tuple[str, ...],
+    occurred_at: str,
+) -> str:
+    marks = ", ".join("?" for _ in action_types)
+    row = connection.execute(
+        f"""
+        SELECT payload FROM learning_journal
+        WHERE learner = ? AND entry_type IN ({marks}) AND occurred_at <= ?
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT 1
+        """,
+        (learner, *action_types, occurred_at),
+    ).fetchone()
+    if row is None:
+        return "Mali"
+    payload = _mapping(_decoded(_text(row["payload"])))
+    actor = _text(payload["actor"])
+    return {
+        "admin": "Administrator",
+        "engine": "Mali",
+        "instructor": "Tutor",
+        "student": "Student",
+        "teacher": "Teacher",
+    }.get(actor, "Mali")
+
+
+def _override_claim(
+    snapshot: Snapshot, payload: str, occurred_at: str
+) -> LearningClaim:
+    data = _mapping(_decoded(payload))
+    action = _mapping(data["action"])
+    fields = _mapping(action["fields"])
+    title = _skill_title(
+        snapshot.progress.curriculum, skill_code(_text(fields["skill"]))
+    )
+    if title is None:
+        raise StoreError("teacher note must name a skill")
+    return LearningClaim(
+        f"Mastered {title}",
+        f"Teacher note: {_text(fields['note'])}",
+        occurred_at,
+        "Teacher",
+        (),
+    )
+
+
+def _optional_text(value: object) -> str | None:
+    return None if value is None else _text(value)
 
 
 def _template_payload(template: QuestionTemplate | None) -> str:

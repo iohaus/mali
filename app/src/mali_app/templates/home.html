@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}Mali · Start learning{% endblock %}
+
+{% block content %}
+<main class="welcome-shell">
+  <section class="welcome-card" aria-labelledby="welcome-title">
+    <p class="eyebrow">A thoughtful fraction tutor</p>
+    <h1 id="welcome-title">Learn one solid step at a time.</h1>
+    <p class="lede">Mali helps you practise what you are ready for and keeps a clear record for your teacher.</p>
+    {% if error %}<p class="notice notice-error" role="alert">{{ error }}</p>{% endif %}
+    <form action="/learners" method="post" class="stacked-form">
+      <label for="display_name">Your name</label>
+      <input id="display_name" name="display_name" autocomplete="name" required maxlength="80" placeholder="Ada">
+      <label for="learner_id">A short learner ID</label>
+      <input id="learner_id" name="learner_id" required maxlength="64" pattern="[a-z0-9-]+" placeholder="ada-1">
+      <button type="submit">Start with Mali</button>
+    </form>
+  </section>
+</main>
+{% endblock %}

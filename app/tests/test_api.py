@@ -9,7 +9,12 @@ from pydantic import BaseModel
 from mali_app.api import create_app
 from mali_app.cli import run
 from mali_app.item_writer import ItemWriterResponse
-from mali_app.model_gateway import StreamDelta, StreamRequest, StructuredRequest
+from mali_app.model_gateway import (
+    ModelIdentity,
+    StreamDelta,
+    StreamRequest,
+    StructuredRequest,
+)
 
 
 def test_api_drives_placement_target_and_check_to_audited_completion(
@@ -103,6 +108,8 @@ def _answer_for(prompt: str) -> str:
 
 
 class ParameterEchoGateway:
+    identity = ModelIdentity("fixture", "parameter-echo")
+
     def __init__(self) -> None:
         self.request_inputs: list[str] = []
 

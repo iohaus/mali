@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Mali · Teacher view{% endblock %}
+
+{% block content %}
+<main class="teacher-shell">
+  <section class="teacher-heading">
+    <p class="eyebrow">Teacher view</p>
+    <h1>Learning, with the work behind it.</h1>
+    <p class="lede">Open a learner to see completed checks, answers, and the record that supports each result.</p>
+  </section>
+  {% if error %}<p class="notice notice-error" role="alert">{{ error }}</p>{% endif %}
+  {% if learners %}
+  <section class="teacher-table" aria-label="Learners">
+    <div class="table-row table-head"><span>Learner</span><span>Completed</span><span>Ready</span><span>Current focus</span><span>Record</span></div>
+    {% for learner in learners %}
+    <a class="table-row" href="/teacher/{{ learner.learner }}">
+      <span>{{ learner.display_name }}</span>
+      <span>{{ learner.mastered_count }}</span>
+      <span>{{ learner.ready_count }}</span>
+      <span>{{ learner.current_title or "—" }}</span>
+      <span class="audit {% if learner.audit_valid %}audit-good{% else %}audit-bad{% endif %}">{% if learner.audit_valid %}Checked{% else %}Needs attention{% endif %}</span>
+    </a>
+    {% endfor %}
+  </section>
+  {% else %}
+  <section class="empty-card"><h2>No learners yet</h2><p>Student records will appear here once someone starts.</p></section>
+  {% endif %}
+</main>
+{% endblock %}

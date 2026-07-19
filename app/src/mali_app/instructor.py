@@ -1,5 +1,6 @@
 """Bounded streamed Instructor episodes with guarded record requests."""
 
+import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import StrEnum
@@ -10,14 +11,13 @@ from uuid import uuid4
 from mali.actions import Actor, ProposeTarget, StartCheck
 from mali.curriculum import Skill
 from mali.errors import InvalidIdentifier
-from mali.ids import LearnerId, skill_code
+from mali.ids import LearnerId, SkillCode, skill_code
 from mali.rules import RefusalReason
 from mali.snapshot import Snapshot
 from mali.views import InstructorContextPack, instructor_context
 
 from mali_app.degradation import DegradationController, DegradationLevel
 from mali_app.model_gateway import (
-    DEFAULT_MODEL,
     FunctionTool,
     GatewayError,
     ModelGateway,
@@ -26,6 +26,8 @@ from mali_app.model_gateway import (
 from mali_app.ports import RecordStore
 from mali_app.prompt_assets import instructor_prompt, render_instructor_context
 from mali_app.store_types import ExecutionStatus, TeachingTrace
+
+_LOG = logging.getLogger(__name__)
 
 
 class InstructorOutcome(StrEnum):
@@ -86,12 +88,32 @@ class InstructorEpisode:
         self._degradation = degradation
 
     def stream(
-        self, learner: LearnerId, snapshot: Snapshot, student_turn: str
+        self,
+        learner: LearnerId,
+        snapshot: Snapshot,
+        student_turn: str,
+        *,
+        prerequisite_path: tuple[SkillCode, ...] = (),
     ) -> Iterator[InstructorEvent]:
         """Yield text promptly and persist every completed provider turn."""
-        context = _context_for(self._store, learner, snapshot, student_turn)
+        context = _context_for(
+            self._store,
+            learner,
+            snapshot,
+            student_turn,
+            prerequisite_path=prerequisite_path,
+        )
         episode_id = f"episode-{uuid4().hex}"
         gateway = self._gateway
+        _LOG.info(
+            "instructor episode started learner=%s episode=%s "
+            "target=%s level=%s gateway=%s",
+            learner,
+            episode_id,
+            snapshot.progress.target,
+            self._degradation.level.value,
+            gateway is not None,
+        )
         if self._degradation.level is DegradationLevel.STATIC or gateway is None:
             text = _static_lesson(context)
             self._save_trace(
@@ -103,6 +125,11 @@ class InstructorEpisode:
                 0,
                 0,
                 InstructorOutcome.COMPLETED,
+            )
+            _LOG.info(
+                "instructor episode completed learner=%s episode=%s mode=static",
+                learner,
+                episode_id,
             )
             yield InstructorEvent(text=text)
             yield InstructorEvent(outcome=InstructorOutcome.COMPLETED)
@@ -129,6 +156,14 @@ class InstructorEpisode:
                     0,
                     InstructorOutcome.BUDGET_EXHAUSTED,
                 )
+                _LOG.info(
+                    "instructor episode budget exhausted learner=%s episode=%s "
+                    "turns=%s reserved_tokens=%s",
+                    learner,
+                    episode_id,
+                    turns,
+                    reserved_tokens,
+                )
                 yield InstructorEvent(text=text)
                 yield InstructorEvent(outcome=InstructorOutcome.BUDGET_EXHAUSTED)
                 return
@@ -141,11 +176,26 @@ class InstructorEpisode:
             )
             transcript: list[str] = []
             tool_results: list[dict[str, object]] = []
+            _LOG.debug(
+                "instructor model turn learner=%s episode=%s turn=%s output_limit=%s",
+                learner,
+                episode_id,
+                turns + 1,
+                output_limit,
+            )
             try:
                 for delta in gateway.stream(request):
                     if delta.tool_name is not None:
-                        tool_results.append(
-                            tools.invoke(delta.tool_name, delta.tool_arguments)
+                        result = tools.invoke(delta.tool_name, delta.tool_arguments)
+                        tool_results.append(result)
+                        _LOG.debug(
+                            "instructor function completed learner=%s episode=%s "
+                            "function=%s ok=%s reason=%s",
+                            learner,
+                            episode_id,
+                            delta.tool_name,
+                            result.get("ok"),
+                            result.get("reason"),
                         )
                     elif delta.text:
                         transcript.append(delta.text)
@@ -157,11 +207,18 @@ class InstructorEpisode:
                     learner,
                     snapshot,
                     episode_id,
-                    DEFAULT_MODEL,
+                    gateway.identity.trace_label,
                     "".join(transcript) + text,
                     0,
                     output_limit,
                     InstructorOutcome.GATEWAY_FAILED,
+                )
+                _LOG.warning(
+                    "instructor gateway failed learner=%s episode=%s; "
+                    "switched level=%s",
+                    learner,
+                    episode_id,
+                    self._degradation.level.value,
                 )
                 yield InstructorEvent(text=text)
                 yield InstructorEvent(outcome=InstructorOutcome.GATEWAY_FAILED)
@@ -174,13 +231,21 @@ class InstructorEpisode:
                 learner,
                 snapshot,
                 episode_id,
-                DEFAULT_MODEL,
+                gateway.identity.trace_label,
                 "".join(transcript),
                 0,
                 output_limit,
                 InstructorOutcome.COMPLETED if terminal else "continued",
             )
             if terminal:
+                _LOG.info(
+                    "instructor episode completed learner=%s episode=%s "
+                    "turns=%s reserved_tokens=%s",
+                    learner,
+                    episode_id,
+                    turns,
+                    reserved_tokens,
+                )
                 yield InstructorEvent(outcome=InstructorOutcome.COMPLETED)
                 return
             input_text = _tool_results_input(base_input, tool_results)
@@ -331,7 +396,12 @@ class _InstructorTools:
 
 
 def _context_for(
-    store: RecordStore, learner: LearnerId, snapshot: Snapshot, student_turn: str
+    store: RecordStore,
+    learner: LearnerId,
+    snapshot: Snapshot,
+    student_turn: str,
+    *,
+    prerequisite_path: tuple[SkillCode, ...] = (),
 ) -> InstructorContextPack:
     target = snapshot.progress.target
     if target is None:
@@ -343,6 +413,7 @@ def _context_for(
         ),
         student_turn,
         recent_mistake_limit=snapshot.policy.flow_budget.recent_mistake_limit,
+        prerequisite_path=prerequisite_path,
     )
 
 
@@ -371,8 +442,14 @@ def _tool_results_input(base_input: str, results: list[dict[str, object]]) -> st
 
 
 def _static_lesson(context: InstructorContextPack) -> str:
+    route = (
+        f"\n\nYour path\nStart with {', then '.join(context.prerequisite_path)}."
+        if context.prerequisite_path
+        else ""
+    )
     return (
         f"{context.target_title}\n\n"
         f"What to focus on\n{context.teaching_card}\n\n"
         "Next step\nTake one small step at a time, then explain it in your own words."
+        f"{route}"
     )

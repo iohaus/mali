@@ -1,0 +1,111 @@
+<main id="student-content" class="student-layout">
+  <section class="conversation-card" aria-labelledby="lesson-title">
+    <div class="card-heading">
+      <div>
+        <p class="eyebrow">Your lesson</p>
+        <h1 id="lesson-title">{{ status_copy }}</h1>
+      </div>
+      <span class="learner-label">{{ learner }}</span>
+    </div>
+
+    <div id="lesson-messages" class="lesson-messages" aria-live="polite">
+      <article class="message tutor-message">
+        <p>{% if target_title %}I’m here to help with {{ target_title }}.{% else %}I’m here when you are ready for the next step.{% endif %}</p>
+      </article>
+      {% if feedback %}
+      <article class="message tutor-message">
+        <p>{{ feedback }}</p>
+      </article>
+      {% endif %}
+      {% if lesson_url %}<div data-lesson-url="{{ lesson_url }}"></div>{% endif %}
+    </div>
+
+    {% if target_title %}
+    <form id="lesson-form" class="lesson-form" data-stream-path="/learners/{{ learner }}/lesson/stream">
+      <label class="sr-only" for="student_turn">Ask your tutor</label>
+      <input id="student_turn" name="student_turn" autocomplete="off" placeholder="Ask about {{ target_title }}">
+      <button type="submit">Send</button>
+    </form>
+    {% endif %}
+  </section>
+
+  <aside class="progress-card" aria-labelledby="progress-title">
+    <p class="eyebrow">Your map</p>
+    <h2 id="progress-title">Small steps, clear direction</h2>
+    <section class="map-group">
+      <h3>Mastered</h3>
+      {% if progress.mastered %}
+        <ul>{% for title in progress.mastered %}<li><span class="check">✓</span>{{ title }}</li>{% endfor %}</ul>
+      {% else %}<p class="muted">Your completed skills will appear here.</p>{% endif %}
+    </section>
+    <section class="map-group">
+      <h3>Next up</h3>
+      {% if progress.next_up %}
+        <ul>{% for title in progress.next_up %}<li>{{ title }}</li>{% endfor %}</ul>
+      {% else %}<p class="muted">Finish the current step to reveal more.</p>{% endif %}
+    </section>
+    <section class="map-group">
+      <h3>Later</h3>
+      {% if progress.later %}
+        <ul>{% for title in progress.later %}<li>{{ title }}</li>{% endfor %}</ul>
+      {% else %}<p class="muted">More skills will appear as your map grows.</p>{% endif %}
+    </section>
+  </aside>
+
+  <section class="practice-card" aria-labelledby="practice-title">
+    <p class="eyebrow">Practice</p>
+    <h2 id="practice-title">{% if question %}Your question{% elif not placed %}Find your starting point{% elif target_title %}Ready when you are{% else %}Choose your next step{% endif %}</h2>
+
+    {% if question %}
+      <p class="question-prompt">{{ question.prompt }}</p>
+      <form
+        class="answer-form"
+        hx-post="/learners/{{ learner }}/answers"
+        hx-target="#student-content"
+        hx-swap="outerHTML"
+      >
+        <input type="hidden" name="question_id" value="{{ question.identifier }}">
+        {% if question.answer_type == "choice" %}
+          <fieldset>
+            <legend class="sr-only">Choose an answer</legend>
+            {% for option in question.options %}
+              <label class="option"><input type="radio" name="answer" value="{{ option }}" required> {{ option }}</label>
+            {% endfor %}
+          </fieldset>
+        {% else %}
+          <label for="answer">Your answer</label>
+          <input id="answer" name="answer" required autocomplete="off" inputmode="{% if question.answer_type == 'integer' %}numeric{% else %}text{% endif %}" placeholder="Write your answer">
+        {% endif %}
+        <button type="submit">Check my answer</button>
+      </form>
+    {% elif not placed %}
+      <p>We’ll use a few questions to find a comfortable place to begin.</p>
+      <form hx-post="/learners/{{ learner }}/placement" hx-target="#student-content" hx-swap="outerHTML">
+        <button type="submit">Let’s see where I am</button>
+      </form>
+    {% elif target_title %}
+      <p>When this feels comfortable, take a short check to show what you have learned.</p>
+      <form hx-post="/learners/{{ learner }}/check" hx-target="#student-content" hx-swap="outerHTML">
+        <button type="submit">Start a quick check</button>
+      </form>
+    {% else %}
+      <p>Pick one of the ready skills below. You can also look ahead to see what comes later.</p>
+    {% endif %}
+
+    {% if placed and not question %}
+      <div class="skill-actions">
+        <h3>Choose a skill</h3>
+        {% for title in progress.next_up %}
+          <form hx-post="/learners/{{ learner }}/targets/{{ title|lower|replace(' ', '-') }}" hx-target="#student-content" hx-swap="outerHTML">
+            <button class="skill-button" type="submit">{{ title }}</button>
+          </form>
+        {% endfor %}
+        {% for title in progress.later %}
+          <form hx-post="/learners/{{ learner }}/targets/{{ title|lower|replace(' ', '-') }}" hx-target="#student-content" hx-swap="outerHTML">
+            <button class="skill-button skill-button-later" type="submit">{{ title }}</button>
+          </form>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </section>
+</main>

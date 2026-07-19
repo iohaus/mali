@@ -1,0 +1,155 @@
+:root {
+  --ink: #16201c;
+  --muted: #5d6b64;
+  --paper: #f8f7f2;
+  --panel: #ffffff;
+  --line: #dce2dc;
+  --green: #23674f;
+  --green-soft: #e3f2e9;
+  --gold: #c77b26;
+  --gold-soft: #fff2df;
+  --red: #9c3f35;
+  --shadow: 0 16px 40px rgb(29 43 35 / 8%);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-width: 320px;
+  color: var(--ink);
+  background: var(--paper);
+  font-family: ui-rounded, "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+a { color: inherit; }
+
+button, input { font: inherit; }
+
+button, .button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.8rem;
+  border: 0;
+  border-radius: .75rem;
+  padding: .65rem 1rem;
+  background: var(--green);
+  color: #fff;
+  font-weight: 750;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+button:hover, .button-link:hover { background: #184b39; }
+
+input {
+  width: 100%;
+  border: 1px solid #aebbb3;
+  border-radius: .65rem;
+  padding: .75rem .85rem;
+  color: var(--ink);
+  background: #fff;
+}
+
+input:focus { outline: 3px solid #b4dfc8; outline-offset: 1px; }
+
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 1.15rem 1.5rem;
+}
+
+.brand { color: var(--green); font-family: Georgia, serif; font-size: 1.55rem; font-weight: 800; text-decoration: none; }
+.site-header nav { display: flex; gap: 1.15rem; font-size: .95rem; }
+.site-header nav a { color: var(--muted); text-decoration: none; }
+.site-header nav a:hover { color: var(--green); }
+
+.welcome-shell { display: grid; min-height: calc(100vh - 82px); place-items: center; padding: 2rem 1.5rem 5rem; }
+.welcome-card, .empty-card { width: min(100%, 600px); padding: clamp(1.7rem, 5vw, 3.4rem); border: 1px solid var(--line); border-radius: 1.25rem; background: var(--panel); box-shadow: var(--shadow); }
+.welcome-card h1, .teacher-heading h1 { margin: .35rem 0 .8rem; font-family: Georgia, serif; font-size: clamp(2.25rem, 6vw, 4.2rem); line-height: 1.04; }
+.lede { max-width: 640px; color: var(--muted); font-size: 1.07rem; }
+.eyebrow { margin: 0; color: var(--green); font-size: .78rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.stacked-form { display: grid; gap: .5rem; margin-top: 2rem; }
+.stacked-form label { margin-top: .6rem; font-weight: 700; }
+.stacked-form button { margin-top: 1.1rem; }
+
+.student-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(260px, .65fr); grid-template-areas: "chat map" "practice map"; gap: 1.25rem; max-width: 1180px; margin: 0 auto; padding: 1rem 1.5rem 4rem; }
+.conversation-card, .progress-card, .practice-card, .teacher-table, .teacher-map, .claim-card { border: 1px solid var(--line); border-radius: 1.1rem; background: var(--panel); box-shadow: var(--shadow); }
+.conversation-card { grid-area: chat; padding: 1.5rem; }
+.progress-card { grid-area: map; padding: 1.5rem; }
+.practice-card { grid-area: practice; padding: 1.5rem; }
+.card-heading { display: flex; align-items: start; justify-content: space-between; gap: 1rem; }
+.card-heading h1 { margin: .3rem 0 0; font-size: clamp(1.5rem, 4vw, 2.25rem); line-height: 1.15; }
+.learner-label { border-radius: 999px; padding: .25rem .6rem; color: var(--muted); background: #f0f3ef; font-size: .8rem; }
+.lesson-messages { display: grid; gap: .75rem; min-height: 8rem; margin: 1.4rem 0; }
+.message { max-width: 90%; border-radius: 1rem 1rem 1rem .25rem; padding: .75rem 1rem; }
+.message p { margin: 0; white-space: pre-wrap; }
+.tutor-message { background: var(--green-soft); }
+.student-message { justify-self: end; border-radius: 1rem 1rem .25rem 1rem; background: var(--gold-soft); }
+.lesson-form { display: flex; gap: .6rem; }
+.lesson-form input { min-width: 0; }
+.lesson-form button { flex: 0 0 auto; }
+
+.progress-card h2, .practice-card h2, .claims h2 { margin: .35rem 0 1rem; font-size: 1.35rem; }
+.map-group { margin-top: 1.3rem; }
+.map-group h3, .skill-actions h3 { margin: 0 0 .45rem; font-size: .95rem; }
+.map-group ul { display: grid; gap: .35rem; margin: 0; padding: 0; list-style: none; }
+.map-group li { padding: .35rem 0; border-bottom: 1px solid #edf0ec; }
+.check { display: inline-grid; width: 1.25rem; height: 1.25rem; place-items: center; margin-right: .45rem; border-radius: 50%; color: #fff; background: var(--green); font-size: .78rem; }
+.muted { color: var(--muted); font-size: .9rem; }
+.question-prompt { margin: 1rem 0 1.25rem; font-size: clamp(1.15rem, 3vw, 1.45rem); font-weight: 750; }
+.answer-form { display: grid; gap: .75rem; max-width: 510px; }
+.answer-form label { font-weight: 700; }
+.answer-form fieldset { display: grid; gap: .6rem; border: 0; margin: 0; padding: 0; }
+.option { display: flex; align-items: center; gap: .6rem; border: 1px solid var(--line); border-radius: .65rem; padding: .7rem; }
+.option input { width: auto; }
+.skill-actions { display: flex; flex-wrap: wrap; gap: .65rem; margin-top: 1.7rem; padding-top: 1.25rem; border-top: 1px solid var(--line); }
+.skill-actions h3 { flex-basis: 100%; }
+.skill-button { background: var(--gold); }
+.skill-button:hover { background: #9d5d1b; }
+.skill-button-later { color: var(--ink); background: #eef0ec; }
+.skill-button-later:hover { background: #dce4dd; }
+
+.teacher-shell { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+.teacher-heading { margin: 1.3rem 0 2rem; }
+.teacher-heading h1 { font-size: clamp(2.1rem, 5vw, 3.6rem); }
+.teacher-table { overflow: hidden; }
+.table-row { display: grid; grid-template-columns: minmax(150px, 2fr) repeat(3, minmax(80px, 1fr)) minmax(100px, 1fr); gap: 1rem; align-items: center; padding: 1rem 1.15rem; border-bottom: 1px solid var(--line); text-decoration: none; }
+.table-row:last-child { border-bottom: 0; }
+.table-row:not(.table-head):hover { background: #f5f8f4; }
+.table-head { color: var(--muted); background: #f4f6f2; font-size: .76rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.audit { display: inline-flex; width: fit-content; border-radius: 999px; padding: .18rem .55rem; font-size: .78rem; font-weight: 750; }
+.audit-good { color: #175439; background: var(--green-soft); }
+.audit-bad { color: #87342b; background: #fae4df; }
+.back-link { color: var(--green); font-weight: 750; text-decoration: none; }
+.teacher-map { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; overflow: hidden; margin: 2rem 0; background: var(--line); }
+.teacher-map div { padding: 1.2rem; background: var(--panel); }
+.teacher-map h2 { margin: 0; font-size: 1rem; }
+.teacher-map p { margin: .5rem 0 0; color: var(--muted); }
+.claim-card { margin-top: .8rem; padding: 0; overflow: hidden; }
+.claim-card summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1.2rem; cursor: pointer; }
+.claim-card summary strong, .claim-card summary small { display: block; }
+.claim-card summary small { margin-top: .2rem; color: var(--muted); }
+.claim-card > p, .evidence-list { margin: 0; padding: 0 1.2rem 1.2rem; }
+.evidence-list { display: grid; gap: .75rem; }
+.evidence-row { border-top: 1px solid var(--line); padding-top: .75rem; }
+.evidence-row dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem; margin: 0; }
+.evidence-row dt { color: var(--muted); font-size: .78rem; }
+.evidence-row dd { margin: .15rem 0 0; font-weight: 650; }
+.notice { border-radius: .75rem; padding: .8rem 1rem; }
+.notice-error { color: #7f2d25; background: #fae4df; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .student-layout { grid-template-columns: 1fr; grid-template-areas: "chat" "practice" "map"; padding: .5rem 1rem 3rem; }
+  .site-header { padding: 1rem; }
+  .teacher-shell { padding: 1.2rem 1rem 3rem; }
+  .teacher-map, .evidence-row dl { grid-template-columns: 1fr; }
+  .table-row { grid-template-columns: 1.5fr .6fr .6fr; gap: .6rem; }
+  .table-row span:nth-child(4), .table-row span:nth-child(5) { display: none; }
+}

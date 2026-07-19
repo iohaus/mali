@@ -25,20 +25,46 @@ _DEMO_SKILL = skill_code("equal-halves")
 
 def demo_curriculum() -> Curriculum:
     """Create the small fraction curriculum used by local demo commands."""
-    template = QuestionTemplate(
+    halves_template = QuestionTemplate(
         (ParameterDomain("numerator", tuple(range(8))),),
         "(numerator + 1) / 2",
         "What is {numerator}/2 + 1/2?",
         AnswerType.FRACTION,
     )
-    skill = Skill(
+    quarters_template = QuestionTemplate(
+        (ParameterDomain("numerator", tuple(range(8))),),
+        "(numerator + 1) / 4",
+        "What is {numerator}/4 + 1/4?",
+        AnswerType.FRACTION,
+    )
+    equal_halves = Skill(
         _DEMO_SKILL,
         0,
         "Equal halves",
         "A whole can be split into two equal halves.",
-        template,
+        halves_template,
     )
-    return Curriculum.load((skill,), ())
+    adding_halves = Skill(
+        skill_code("adding-halves"),
+        1,
+        "Adding halves",
+        "When the parts match, add the top numbers and keep the same halves.",
+        halves_template,
+    )
+    adding_quarters = Skill(
+        skill_code("adding-quarters"),
+        2,
+        "Adding quarters",
+        "Four equal parts make a whole, so matching quarters can be combined.",
+        quarters_template,
+    )
+    return Curriculum.load(
+        (equal_halves, adding_halves, adding_quarters),
+        (
+            (adding_halves.code, (equal_halves.code,)),
+            (adding_quarters.code, (adding_halves.code,)),
+        ),
+    )
 
 
 def seed_demo(store: SQLiteRecordStore) -> Snapshot:

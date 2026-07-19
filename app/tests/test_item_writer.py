@@ -12,7 +12,10 @@ from pydantic import BaseModel
 
 from mali_app.item_writer import ItemWriter, ItemWriterResponse
 from mali_app.model_gateway import (
+    GatewayError,
     GatewaySchemaViolation,
+    GatewayUnavailable,
+    ModelIdentity,
     StreamDelta,
     StreamRequest,
     StructuredRequest,
@@ -20,8 +23,10 @@ from mali_app.model_gateway import (
 
 
 class ScriptedFixtureGateway:
+    identity = ModelIdentity("fixture", "item-writer")
+
     def __init__(
-        self, responses: list[ItemWriterResponse | GatewaySchemaViolation]
+        self, responses: list[ItemWriterResponse | GatewayError]
     ) -> None:
         self.responses = responses
         self.request_inputs: list[str] = []
@@ -34,7 +39,7 @@ class ScriptedFixtureGateway:
     ) -> ResultT:
         self.request_inputs.append(request.input)
         response = self.responses.pop(0)
-        if isinstance(response, GatewaySchemaViolation):
+        if isinstance(response, GatewayError):
             raise response
         return request.result_type.model_validate(response.model_dump(mode="json"))
 
@@ -109,3 +114,16 @@ def test_item_writer_falls_back_after_schema_and_dropped_value_fixtures() -> Non
         "question text omits required values",
         "question text omits required values",
     )
+
+
+def test_item_writer_falls_back_without_repeating_an_unavailable_gateway() -> None:
+    template, instance = _question()
+    gateway = ScriptedFixtureGateway([GatewayUnavailable("forbidden")])
+
+    result = ItemWriter(gateway).render(POLICY_V1, template, instance)
+
+    assert result.question_text == instance.text
+    assert result.used_fallback
+    assert result.gateway_failed
+    assert result.attempts == 1
+    assert result.rejection_reasons == ("GatewayUnavailable",)

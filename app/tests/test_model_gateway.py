@@ -13,6 +13,7 @@ from mali_app.model_gateway import (
     GatewaySchemaViolation,
     GatewayTimeout,
     GatewayUnavailable,
+    ModelIdentity,
     OpenAIModelGateway,
     RecordedFixture,
     RecordingModelGateway,
@@ -31,6 +32,7 @@ class WrittenItem(BaseModel):
 class StaticGateway:
     text: tuple[str, ...]
     item: WrittenItem
+    identity = ModelIdentity("fixture", "static")
 
     def stream(self, request: StreamRequest) -> Iterator[StreamDelta]:
         return (StreamDelta(text) for text in self.text)
@@ -105,6 +107,7 @@ def test_live_gateway_uses_responses_streaming_and_structured_parsing(
     assert responses.create_calls[0]["store"] is False
     assert responses.create_calls[0]["model"] == "gpt-5.6"
     assert responses.parse_calls[0]["text_format"] is WrittenItem
+    assert gateway.identity.trace_label == "openai:gpt-5.6"
 
 
 def test_live_gateway_exposes_strict_tools_and_maps_function_calls() -> None:
@@ -163,6 +166,11 @@ def test_live_gateway_requires_an_environment_credential(
         OpenAIModelGateway()
 
 
+def test_live_gateway_rejects_an_invalid_base_url() -> None:
+    with pytest.raises(GatewayConfigurationError, match="base URL"):
+        OpenAIModelGateway(base_url="not-a-url", client=FakeClient(FakeResponses()))
+
+
 def test_live_gateway_retries_a_transient_timeout_before_streaming() -> None:
     responses = FakeResponses(
         stream_results=[
@@ -191,6 +199,18 @@ def test_live_gateway_returns_a_typed_timeout_after_bounded_retries() -> None:
     assert len(responses.create_calls) == 2
 
 
+def test_live_gateway_does_not_retry_a_forbidden_request() -> None:
+    responses = FakeResponses(parse_results=[PermissionDeniedError()])
+    gateway = OpenAIModelGateway(client=FakeClient(responses), retry_attempts=2)
+
+    with pytest.raises(GatewayUnavailable):
+        gateway.structured(
+            StructuredRequest("Write clearly.", "Help.", 50, WrittenItem)
+        )
+
+    assert len(responses.parse_calls) == 1
+
+
 def test_live_gateway_rejects_a_failed_stream_as_unavailable() -> None:
     responses = FakeResponses(
         stream_results=[iter((SimpleNamespace(type="response.failed"),))]
@@ -202,7 +222,12 @@ def test_live_gateway_rejects_a_failed_stream_as_unavailable() -> None:
 
 
 class FakeResponses:
-    def __init__(self, *, stream_results: list[object] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        stream_results: list[object] | None = None,
+        parse_results: list[object] | None = None,
+    ) -> None:
         self.create_calls: list[dict[str, object]] = []
         self.parse_calls: list[dict[str, object]] = []
         self._stream_results = stream_results or [
@@ -214,6 +239,7 @@ class FakeResponses:
                 )
             )
         ]
+        self._parse_results = parse_results or []
 
     def create(self, **kwargs: object) -> object:
         self.create_calls.append(kwargs)
@@ -224,9 +250,18 @@ class FakeResponses:
 
     def parse(self, **kwargs: object) -> object:
         self.parse_calls.append(kwargs)
+        if self._parse_results:
+            result = self._parse_results.pop(0)
+            if isinstance(result, Exception):
+                raise result
+            return result
         return SimpleNamespace(
             output_parsed=WrittenItem(prompt="1/2 + 1/2", answer="1")
         )
+
+
+class PermissionDeniedError(Exception):
+    status_code = 403
 
 
 @dataclass

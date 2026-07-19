@@ -1,5 +1,6 @@
 """HTTP adapter for the deterministic local Mali tutoring flow."""
 
+import logging
 from collections.abc import Iterator
 from json import dumps
 
@@ -28,12 +29,15 @@ from mali_app.degradation import DegradationController, DegradationLevel
 from mali_app.demo import demo_curriculum
 from mali_app.instructor import InstructorEpisode, InstructorEvent
 from mali_app.item_writer import ItemWriter
-from mali_app.model_gateway import ModelGateway, OpenAIModelGateway
+from mali_app.model_gateway import ModelGateway
+from mali_app.model_providers import create_model_gateway_from_environment
 from mali_app.schema import DatabasePath
 from mali_app.store import LearnerNotFound, SQLiteRecordStore, StoreError
 from mali_app.store_types import ExecutionResult, ExecutionStatus
+from mali_app.web import install_web_routes
 
 _DEFAULT_DATABASE = "mali.db"
+_LOG = logging.getLogger(__name__)
 _REFUSAL_COPY = {
     RefusalReason.NOT_READY_YET: "That skill comes later. Start with the next step.",
     RefusalReason.ALREADY_MASTERED: "You have already completed that skill.",
@@ -97,7 +101,7 @@ def create_app(
     gateway = (
         model_gateway
         if model_gateway is not None
-        else OpenAIModelGateway()
+        else create_model_gateway_from_environment()
         if needs_gateway
         else None
     )
@@ -106,6 +110,13 @@ def create_app(
     )
     instructor = (
         InstructorEpisode(store, gateway, controller) if enable_instructor else None
+    )
+    _LOG.info(
+        "application configured database=%s instructor=%s item_writer=%s level=%s",
+        database,
+        enable_instructor,
+        enable_item_writer,
+        controller.level.value,
     )
     app = FastAPI(title="Mali", version="v1")
 
@@ -240,6 +251,18 @@ def create_app(
     )
     app.add_api_route("/v1/learners/{learner}/lesson", lesson, methods=["POST"])
     app.add_api_route("/v1/learners/{learner}/answers", submit_answer, methods=["POST"])
+    web_instructor = (
+        instructor
+        if instructor is not None
+        else InstructorEpisode(store, None, controller)
+    )
+
+    def web_question_prompt(snapshot: Snapshot, question: Question) -> str:
+        if item_writer is None:
+            return question.instance.text
+        return _item_writer_prompt(snapshot, question, item_writer, controller)
+
+    install_web_routes(app, store, web_instructor, web_question_prompt)
     return app
 
 
@@ -373,6 +396,13 @@ def _item_writer_prompt(
         used_fallback=result.used_fallback,
         gateway_failed=result.gateway_failed,
     )
+    if result.used_fallback:
+        _LOG.warning(
+            "question rendering used deterministic fallback "
+            "checkpoint=%s gateway_failed=%s",
+            checkpoint_id,
+            result.gateway_failed,
+        )
     return result.question_text
 
 

@@ -16,6 +16,7 @@ from mali_app.degradation import DegradationController, DegradationLevel
 from mali_app.model_gateway import (
     GatewaySchemaViolation,
     GatewayUnavailable,
+    ModelIdentity,
     StreamDelta,
     StreamRequest,
     StructuredRequest,
@@ -24,6 +25,8 @@ from mali_app.model_gateway import (
 
 class ScriptedInstructorGateway:
     """Replay pre-recorded Instructor turns without any network access."""
+
+    identity = ModelIdentity("fixture", "instructor")
 
     def __init__(
         self, turns: list[tuple[StreamDelta, ...] | GatewayUnavailable]
@@ -48,6 +51,8 @@ class ScriptedInstructorGateway:
 
 class RejectingWriterGateway:
     """Force the writer's bounded validation fallback for one checkpoint."""
+
+    identity = ModelIdentity("fixture", "rejecting-writer")
 
     def __init__(self) -> None:
         self.structured_calls = 0
@@ -302,7 +307,7 @@ def _assert_trace_rows(database: str, *, expected_outcomes: tuple[str, ...]) -> 
         connection.close()
     assert [row[1:3] for row in rows] == [("instructor_v1", "v1")] * len(rows)
     assert [row[3] for row in rows] == list(expected_outcomes)
-    assert all(row[0] in {"gpt-5.6", "static"} for row in rows)
+    assert all(row[0] in {"fixture:instructor", "static"} for row in rows)
 
 
 def _learner_state(database: str, learner: str) -> tuple[int, str | None, int]:

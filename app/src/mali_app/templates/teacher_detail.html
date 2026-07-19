@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}Mali · {{ detail.display_name }}{% endblock %}
+
+{% block content %}
+<main class="teacher-shell">
+  <a class="back-link" href="/teacher">← All learners</a>
+  <section class="teacher-heading">
+    <p class="eyebrow">{{ detail.display_name }}</p>
+    <h1>Progress and supporting work</h1>
+    <p class="lede">The record is {% if detail.audit.valid %}<span class="audit audit-good">checked</span>{% else %}<span class="audit audit-bad">needs attention</span>{% endif %}: {{ detail.audit.detail }}.</p>
+  </section>
+  <section class="teacher-map">
+    <div><h2>Mastered</h2><p>{% if detail.mastered %}{{ detail.mastered|join(', ') }}{% else %}Nothing completed yet{% endif %}</p></div>
+    <div><h2>Next up</h2><p>{% if detail.next_up %}{{ detail.next_up|join(', ') }}{% else %}No skill ready yet{% endif %}</p></div>
+    <div><h2>Later</h2><p>{% if detail.later %}{{ detail.later|join(', ') }}{% else %}Nothing waiting{% endif %}</p></div>
+  </section>
+  <section class="claims" aria-labelledby="claims-title">
+    <p class="eyebrow">Supporting work</p>
+    <h2 id="claims-title">Completed checks and teacher notes</h2>
+    {% if detail.claims %}
+      {% for claim in detail.claims %}
+      <details class="claim-card">
+        <summary><span><strong>{{ claim.title }}</strong><small>{{ claim.occurred_at }}</small></span><span>{{ claim.attribution }}</span></summary>
+        <p>{{ claim.detail }}</p>
+        {% if claim.questions %}
+        <div class="evidence-list">
+          {% for question in claim.questions %}
+          <article class="evidence-row">
+            <p class="question-prompt">{{ question.prompt }}</p>
+            <dl>
+              <div><dt>Student answer</dt><dd>{{ question.response or "No answer recorded" }}</dd></div>
+              <div><dt>Result</dt><dd>{% if question.correct is true %}Correct{% elif question.correct is false %}Try again{% else %}Not answered{% endif %}</dd></div>
+              <div><dt>Answered</dt><dd>{{ question.answered_at or "—" }}</dd></div>
+            </dl>
+          </article>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </details>
+      {% endfor %}
+    {% else %}
+      <section class="empty-card"><p>Completed checks and teacher notes will appear here.</p></section>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}

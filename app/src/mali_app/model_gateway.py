@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from os import environ
 from typing import Protocol, cast
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ValidationError
 
@@ -15,6 +17,7 @@ DEFAULT_MODEL = "gpt-5.6"
 DEFAULT_TIMEOUT_SECONDS = 30.0
 DEFAULT_RETRY_ATTEMPTS = 2
 _API_KEY_ENVIRONMENT_NAME = "OPENAI_API_KEY"
+_LOG = logging.getLogger(__name__)
 
 
 class GatewayError(Exception):
@@ -39,6 +42,23 @@ class GatewaySchemaViolation(GatewayError):
 
 class FixtureMissing(GatewayError):
     """Raised when an offline test requests a model result not in its fixtures."""
+
+
+@dataclass(frozen=True, slots=True)
+class ModelIdentity:
+    """Provider and model attribution retained with every teaching trace."""
+
+    provider: str
+    model: str
+
+    def __post_init__(self) -> None:
+        if not self.provider.strip() or not self.model.strip():
+            raise ValueError("model identity needs a provider and model name")
+
+    @property
+    def trace_label(self) -> str:
+        """Return the stable value persisted in the teaching trace."""
+        return f"{self.provider}:{self.model}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,25 +149,38 @@ class _OpenAIClient(Protocol):
 
 
 class OpenAIModelGateway:
-    """Call GPT-5.6 through the OpenAI Responses API with bounded retries."""
+    """Call an OpenAI Responses model with bounded retries."""
 
     def __init__(
         self,
         *,
         model: str = DEFAULT_MODEL,
+        base_url: str | None = None,
+        api_key: str | None = None,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
         client: _OpenAIClient | None = None,
     ) -> None:
         if not model:
             raise GatewayConfigurationError("model name must not be blank")
+        _validate_base_url(base_url)
         if timeout_seconds <= 0:
             raise GatewayConfigurationError("gateway timeout must be positive")
         if retry_attempts < 1:
             raise GatewayConfigurationError("gateway attempts must be positive")
         self._model = model
+        self._identity = ModelIdentity("openai", model)
         self._retry_attempts = retry_attempts
-        self._client = _openai_client(timeout_seconds) if client is None else client
+        self._client = (
+            _openai_client(timeout_seconds, base_url, api_key)
+            if client is None
+            else client
+        )
+
+    @property
+    def identity(self) -> ModelIdentity:
+        """Return the OpenAI model selected for this gateway."""
+        return self._identity
 
     def stream(self, request: StreamRequest) -> Iterator[StreamDelta]:
         """Yield typed text fragments from one live model request."""
@@ -163,7 +196,7 @@ class OpenAIModelGateway:
                     "stream": True,
                 }
                 if request.tools:
-                    payload["tools"] = [_tool_payload(tool) for tool in request.tools]
+                    payload["tools"] = self._tool_payloads(request.tools)
                 response = self._client.responses.create(**payload)
                 for event in _as_iterator(response):
                     delta = _stream_delta(event)
@@ -173,7 +206,20 @@ class OpenAIModelGateway:
                 return
             except Exception as error:
                 gateway_error = _gateway_error(error)
-                if emitted or attempt == self._retry_attempts - 1:
+                retryable = _is_retryable(error)
+                _log_request_failure(
+                    "stream",
+                    self._model,
+                    attempt + 1,
+                    self._retry_attempts,
+                    error,
+                    retryable,
+                )
+                if (
+                    emitted
+                    or not retryable
+                    or attempt == self._retry_attempts - 1
+                ):
                     raise gateway_error from error
 
     def structured[ResultT: BaseModel](
@@ -204,9 +250,24 @@ class OpenAIModelGateway:
                 raise
             except Exception as error:
                 gateway_error = _gateway_error(error)
-                if attempt == self._retry_attempts - 1:
+                retryable = _is_retryable(error)
+                _log_request_failure(
+                    "structured",
+                    self._model,
+                    attempt + 1,
+                    self._retry_attempts,
+                    error,
+                    retryable,
+                )
+                if not retryable or attempt == self._retry_attempts - 1:
                     raise gateway_error from error
         raise AssertionError("bounded gateway loop must return or raise")
+
+    def _tool_payloads(
+        self, tools: tuple[FunctionTool, ...]
+    ) -> list[dict[str, object]]:
+        """Translate Mali's closed tool contract to OpenAI Responses tools."""
+        return [_tool_payload(tool) for tool in tools]
 
 
 class FixtureModelGateway:
@@ -214,6 +275,11 @@ class FixtureModelGateway:
 
     def __init__(self, fixtures: Sequence[RecordedFixture]) -> None:
         self._fixtures = {fixture.fingerprint: fixture for fixture in fixtures}
+
+    @property
+    def identity(self) -> ModelIdentity:
+        """Identify deterministic replay without claiming a live provider."""
+        return ModelIdentity("fixture", "replay")
 
     def stream(self, request: StreamRequest) -> Iterator[StreamDelta]:
         """Yield recorded text and function-call events for a matching request."""
@@ -255,6 +321,11 @@ class RecordingModelGateway:
         """Return fixtures in the order their source requests completed."""
         return tuple(self._fixtures)
 
+    @property
+    def identity(self) -> ModelIdentity:
+        """Preserve attribution from the wrapped live or fixture gateway."""
+        return self._gateway.identity
+
     def stream(self, request: StreamRequest) -> Iterator[StreamDelta]:
         """Forward a stream and record all of its typed result events."""
         events = tuple(self._gateway.stream(request))
@@ -278,7 +349,12 @@ class RecordingModelGateway:
 
 
 class ModelGateway(Protocol):
-    """The swappable application boundary for GPT-backed tutoring flows."""
+    """Provider-neutral boundary for the tutoring model capabilities Mali needs."""
+
+    @property
+    def identity(self) -> ModelIdentity:
+        """Return attribution for traces, logs, and provider-independent policy."""
+        ...
 
     def stream(self, request: StreamRequest) -> Iterator[StreamDelta]: ...
 
@@ -287,8 +363,13 @@ class ModelGateway(Protocol):
     ) -> ResultT: ...
 
 
-def _openai_client(timeout_seconds: float) -> _OpenAIClient:
-    if not environ.get(_API_KEY_ENVIRONMENT_NAME):
+def _openai_client(
+    timeout_seconds: float,
+    base_url: str | None = None,
+    api_key: str | None = None,
+) -> _OpenAIClient:
+    resolved_api_key = api_key or environ.get(_API_KEY_ENVIRONMENT_NAME)
+    if not resolved_api_key:
         raise GatewayConfigurationError(
             f"{_API_KEY_ENVIRONMENT_NAME} must be set for live model calls"
         )
@@ -298,7 +379,25 @@ def _openai_client(timeout_seconds: float) -> _OpenAIClient:
         raise GatewayConfigurationError(
             "install the OpenAI SDK before using the live model gateway"
         ) from error
-    return cast(_OpenAIClient, OpenAI(timeout=timeout_seconds, max_retries=0))
+    options: dict[str, object] = {
+        "api_key": resolved_api_key,
+        "timeout": timeout_seconds,
+        "max_retries": 0,
+    }
+    if base_url is not None:
+        options["base_url"] = base_url
+    return cast(_OpenAIClient, OpenAI(**options))
+
+
+def _validate_base_url(base_url: str | None) -> None:
+    """Reject malformed endpoint overrides before any provider SDK is loaded."""
+    if base_url is None:
+        return
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise GatewayConfigurationError(
+            "model base URL must be an absolute HTTP(S) URL"
+        )
 
 
 def _validate_request(
@@ -368,6 +467,51 @@ def _gateway_error(error: Exception) -> GatewayError:
     }:
         return GatewayUnavailable("model service is unavailable")
     return GatewayUnavailable("model service returned an unexpected error")
+
+
+def _is_retryable(error: Exception) -> bool:
+    """Return whether the failure can plausibly succeed on another attempt."""
+    if isinstance(error, (GatewayTimeout, GatewayUnavailable)):
+        return True
+    if type(error).__name__ in {
+        "APITimeoutError",
+        "TimeoutError",
+        "APIConnectionError",
+        "InternalServerError",
+        "RateLimitError",
+    }:
+        return True
+    status_code = _status_code(error)
+    return status_code in {408, 409, 429} or (
+        status_code is not None and status_code >= 500
+    )
+
+
+def _log_request_failure(
+    operation: str,
+    model: str,
+    attempt: int,
+    attempt_limit: int,
+    error: Exception,
+    retryable: bool,
+) -> None:
+    """Record request metadata without logging prompts or student content."""
+    _LOG.warning(
+        "model request failed operation=%s model=%s attempt=%s/%s "
+        "error=%s status=%s retryable=%s",
+        operation,
+        model,
+        attempt,
+        attempt_limit,
+        type(error).__name__,
+        _status_code(error),
+        retryable,
+    )
+
+
+def _status_code(error: Exception) -> int | None:
+    status_code = getattr(error, "status_code", None)
+    return status_code if type(status_code) is int else None
 
 
 def _stream_fingerprint(request: StreamRequest) -> str:

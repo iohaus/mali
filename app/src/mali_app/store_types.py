@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
-from mali.ids import SkillCode
+from mali.ids import LearnerId, SkillCode
 from mali.plans import ActionPlan
 from mali.rules import RefusalReason
 from mali.snapshot import Snapshot
@@ -63,3 +63,50 @@ class TeachingTrace:
     tokens_in: int
     tokens_out: int
     episode_outcome: str
+
+
+@dataclass(frozen=True, slots=True)
+class TeacherLearnerSummary:
+    """One learner row prepared for the teacher dashboard."""
+
+    learner: LearnerId
+    display_name: str
+    mastered_count: int
+    ready_count: int
+    current_title: str | None
+    evidence_count: int
+    audit_valid: bool
+
+
+@dataclass(frozen=True, slots=True)
+class QuestionEvidence:
+    """One question as shown and the recorded student response, if any."""
+
+    prompt: str
+    response: str | None
+    correct: bool | None
+    answered_at: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class LearningClaim:
+    """A teacher-facing claim paired with its recorded support."""
+
+    title: str
+    detail: str
+    occurred_at: str
+    attribution: str
+    questions: tuple[QuestionEvidence, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class TeacherLearnerDetail:
+    """The complete teacher view for one learner."""
+
+    learner: LearnerId
+    display_name: str
+    mastered: tuple[str, ...]
+    next_up: tuple[str, ...]
+    later: tuple[str, ...]
+    audit: AuditResult
+    claims: tuple[LearningClaim, ...]
