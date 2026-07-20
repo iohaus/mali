@@ -15,8 +15,9 @@ record from its evidence journal.
 - **Ask for anything.** A learner names a topic; GPT-5.6 drafts a full curriculum — small skills,
   the order they build on each other, and a practice pattern per skill with a *computed* answer
   key. Mali's deterministic core validates the draft and rejects anything that breaks its rules.
-- **Start in the right place.** A short adaptive check finds what the learner already knows and
-  produces a progress map: Mastered, Next up, Later.
+- **Start in the right place.** The curriculum names the skills it assumes you already have, and
+  a short adaptive check probes them — every answer updates where Mali believes you are, and
+  demonstrated skills are skipped. The result is a progress map: Mastered, Next up, Later.
 - **Learn one solid step at a time.** Streamed conversational lessons focus on exactly one ready
   skill. Ask to skip ahead and the tutor turns the refusal into a plan — the model can propose,
   but the rules decide.

@@ -48,9 +48,10 @@ def test_api_drives_placement_target_and_check_to_audited_completion(
     _adopt_demo_curriculum(database, "api-learner")
     assert client.post("/v1/learners/api-learner/placement").status_code == 200
     for _ in range(5):
-        _answer_current_question(client)
+        _answer_current_question(client, correctly=False)
     placed = client.get("/v1/learners/api-learner/progress")
     assert placed.json()["placed"]
+    assert placed.json()["mastered"] == []
 
     targeted = client.post("/v1/learners/api-learner/targets/equal-halves")
     assert targeted.status_code == 200
@@ -103,16 +104,14 @@ def test_question_endpoint_uses_item_writer_only_when_its_feature_flag_is_on(
     assert len(gateway.request_inputs) == 1
 
 
-def _answer_current_question(client: TestClient) -> None:
+def _answer_current_question(client: TestClient, *, correctly: bool = True) -> None:
     question = client.get("/v1/learners/api-learner/question")
     assert question.status_code == 200
     payload = question.json()
+    answer = _answer_for(payload["prompt"]) if correctly else "999"
     response = client.post(
         "/v1/learners/api-learner/answers",
-        json={
-            "question_id": payload["question_id"],
-            "answer": _answer_for(payload["prompt"]),
-        },
+        json={"question_id": payload["question_id"], "answer": answer},
     )
     assert response.status_code == 200
 

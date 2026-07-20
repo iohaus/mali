@@ -47,13 +47,9 @@
     </div>
 
     <div id="lesson-messages" class="lesson-messages" aria-live="polite">
-      <article class="message tutor-message">
-        <p>{% if target_title %}I’m here to help with {{ target_title }}.{% else %}I’m here when you are ready for the next step.{% endif %}</p>
-      </article>
+      <article class="message tutor-message" data-markdown>{% if target_title %}I’m here to help with {{ target_title }}.{% else %}I’m here when you are ready for the next step.{% endif %}</article>
       {% if feedback %}
-      <article class="message tutor-message">
-        <p>{{ feedback }}</p>
-      </article>
+      <article class="message tutor-message" data-markdown>{{ feedback }}</article>
       {% endif %}
       {% if lesson_url %}<div data-lesson-url="{{ lesson_url }}"></div>{% endif %}
     </div>
@@ -79,13 +75,13 @@
     <section class="map-group">
       <h3>Next up</h3>
       {% if progress.next_up %}
-        <ul>{% for title in progress.next_up %}<li>{{ title }}</li>{% endfor %}</ul>
+        <ul>{% for title in progress.next_up %}<li>{{ title }}{% if title in assumed_titles %} <span class="assumed-badge">assumed</span>{% endif %}</li>{% endfor %}</ul>
       {% else %}<p class="muted">Finish the current step to reveal more.</p>{% endif %}
     </section>
     <section class="map-group">
       <h3>Later</h3>
       {% if progress.later %}
-        <ul>{% for title in progress.later %}<li>{{ title }}</li>{% endfor %}</ul>
+        <ul>{% for title in progress.later %}<li>{{ title }}{% if title in assumed_titles %} <span class="assumed-badge">assumed</span>{% endif %}</li>{% endfor %}</ul>
       {% else %}<p class="muted">More skills will appear as your map grows.</p>{% endif %}
     </section>
   </aside>
@@ -135,13 +131,11 @@
         <h3>Choose a skill</h3>
         {% for code, title in next_up_skills %}
           <form hx-post="/learners/{{ learner }}/targets/{{ code }}" hx-target="#student-content" hx-swap="outerHTML">
-            <button class="skill-button" type="submit">{{ title }}</button>
+            <button class="skill-button" type="submit">{{ title }}{% if title in assumed_titles %} <span class="assumed-badge">assumed</span>{% endif %}</button>
           </form>
         {% endfor %}
         {% for code, title in later_skills %}
-          <form hx-post="/learners/{{ learner }}/targets/{{ code }}" hx-target="#student-content" hx-swap="outerHTML">
-            <button class="skill-button skill-button-later" type="submit">{{ title }}</button>
-          </form>
+          <button class="skill-button skill-button-later" type="button" disabled title="Master the earlier skills first">{{ title }}{% if title in assumed_titles %} <span class="assumed-badge">assumed</span>{% endif %}</button>
         {% endfor %}
       </div>
     {% endif %}

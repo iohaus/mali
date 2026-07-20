@@ -56,9 +56,12 @@ def render_instructor_context(context: InstructorContextPack) -> str:
 
 
 def render_item_writer_context(context: ItemWriterContextPack) -> str:
-    """Render the params-only Item Writer input without exposing a key."""
+    """Render the question-and-values Item Writer input without a key."""
     parameters = "\n".join(f"- {name}: {value}" for name, value in context.parameters)
-    return f"<question-parameters>\n{parameters}\n</question-parameters>"
+    return (
+        f"<question>\n{context.question}\n</question>\n"
+        f"<question-parameters>\n{parameters}\n</question-parameters>"
+    )
 
 
 def _load_prompt(version: str, flow: str) -> PromptAsset:

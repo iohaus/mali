@@ -259,7 +259,10 @@ def _answer_key(
         return str(value.numerator), ()
     if answer_type is AnswerType.CHOICE:
         if value.denominator != 1 or not 0 <= value.numerator < len(options):
-            raise InvalidTemplate("choice answer index must select one option")
+            raise InvalidTemplate(
+                f"choice answer rule produced {value}, but it must be a whole "
+                f"number from 0 to {len(options) - 1} selecting one option"
+            )
         return options[value.numerator], options
     return _format_fraction(value), ()
 

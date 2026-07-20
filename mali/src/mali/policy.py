@@ -118,11 +118,11 @@ _DEFAULT_LUCKY_RATES = (
     (AnswerType.EXACT, Fraction(0)),
     (AnswerType.CHOICE, Fraction(1, 4)),
 )
-POLICY_V1 = TutorPolicy(
-    version="v1",
+POLICY_V2 = TutorPolicy(
+    version="v2",
     certify_threshold=Fraction(4, 5),
     question_budget=5,
-    pass_rule=PassRule(needed=3, asked=4),
+    pass_rule=PassRule(needed=3, asked=3),
     miss_rates=_DEFAULT_MISS_RATES,
     lucky_rates=_DEFAULT_LUCKY_RATES,
     stale_after=timedelta(hours=24),

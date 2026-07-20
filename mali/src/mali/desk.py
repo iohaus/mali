@@ -19,6 +19,7 @@ from mali.actions import (
     StartPlacement,
 )
 from mali.checkpoint import Answer, CheckPoint, CheckPointKind, Question
+from mali.estimate import PlacementEstimate
 from mali.ids import QuestionId, question_id
 from mali.plans import ActionPlan, CheckPointWrite, JournalEntry, ProgressWrite
 from mali.rules import Refused, evaluate
@@ -154,8 +155,14 @@ class TutorDesk:
                 entry,
             )
         if isinstance(action, CertifyPlacement):
+            checkpoint = snapshot.checkpoint
+            questions = checkpoint.questions if checkpoint is not None else ()
+            certified = PlacementEstimate.from_answers(
+                tuple(questions), snapshot.progress.curriculum, snapshot.policy
+            ).certified_mask()
             progress = replace(
                 snapshot.progress,
+                mask=certified,
                 placed=True,
                 version=snapshot.progress.version + 1,
             )

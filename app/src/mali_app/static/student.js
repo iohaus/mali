@@ -37,6 +37,29 @@ function removeElement(element) {
   if (element) element.remove();
 }
 
+/**
+ * Render `text` as sanitized markdown HTML into `container`.
+ * Falls back to leaving textContent untouched when either library is absent
+ * (e.g. CDN blocked, reduced-functionality environment).
+ */
+function renderMarkdown(container, text) {
+  if (typeof marked === "undefined" || typeof DOMPurify === "undefined") return;
+  container.innerHTML = DOMPurify.sanitize(marked.parse(text));
+}
+
+/**
+ * Find every [data-markdown] node inside `root` and render its textContent
+ * as markdown in-place.  Called after each full-page load and HTMX swap so
+ * server-rendered tutor messages are also processed.
+ */
+function renderMarkdownNodes(root = document) {
+  root.querySelectorAll("[data-markdown]").forEach((el) => {
+    const text = el.textContent;
+    el.removeAttribute("data-markdown");
+    renderMarkdown(el, text);
+  });
+}
+
 function startLesson(url) {
   const messages = document.querySelector("#lesson-messages");
   if (!messages || !url) return;
@@ -44,22 +67,47 @@ function startLesson(url) {
   const pending = appendProcessingMessage(messages, "Your tutor is thinking");
   const source = new EventSource(url);
   activeLessonSource = source;
-  let active = null;
+
+  // The <article> that accumulates this episode's response.
+  let activeArticle = null;
+  // Raw plain-text buffer — streamed as textContent; rendered as markdown on close.
+  let rawText = "";
+
+  function finaliseStream() {
+    removeElement(pending);
+    if (activeArticle && rawText) {
+      renderMarkdown(activeArticle, rawText);
+      messages.scrollTop = messages.scrollHeight;
+    }
+  }
+
   source.onmessage = (event) => {
     const payload = JSON.parse(event.data);
     if (payload.text) {
       removeElement(pending);
-      if (!active) active = appendMessage(messages, "", "tutor-message");
-      active.textContent += payload.text;
+      if (!activeArticle) {
+        activeArticle = document.createElement("article");
+        activeArticle.className = "message tutor-message";
+        // Temporary <p> for streaming plain text; replaced on close.
+        const streamParagraph = document.createElement("p");
+        activeArticle.append(streamParagraph);
+        messages.append(activeArticle);
+      }
+      rawText += payload.text;
+      // Display each chunk as plain text while the stream is live so the
+      // reader sees progress without broken mid-stream markdown syntax.
+      const streamParagraph = activeArticle.querySelector("p");
+      if (streamParagraph) streamParagraph.textContent = rawText;
+      messages.scrollTop = messages.scrollHeight;
     }
     if (payload.outcome) {
-      removeElement(pending);
+      finaliseStream();
       source.close();
       if (activeLessonSource === source) activeLessonSource = null;
     }
   };
   source.onerror = () => {
-    removeElement(pending);
+    finaliseStream();
     source.close();
     if (activeLessonSource === source) activeLessonSource = null;
   };
@@ -82,6 +130,12 @@ function curriculumStepRow(step, index) {
   number.className = "path-number";
   number.textContent = String(index + 1);
   title.textContent = step.title;
+  if (step.assumed) {
+    const badge = document.createElement("span");
+    badge.className = "assumed-badge";
+    badge.textContent = "you may know this — checked first";
+    title.append(" ", badge);
+  }
   description.textContent = step.description;
   body.append(title, description);
   row.append(number, body);
@@ -160,8 +214,14 @@ function connectQueuedLesson(root = document) {
   startLesson(url);
 }
 
-document.addEventListener("DOMContentLoaded", () => connectQueuedLesson());
-document.body.addEventListener("htmx:afterSwap", (event) => connectQueuedLesson(event.target));
+document.addEventListener("DOMContentLoaded", () => {
+  connectQueuedLesson();
+  renderMarkdownNodes();
+});
+document.body.addEventListener("htmx:afterSwap", (event) => {
+  connectQueuedLesson(event.target);
+  renderMarkdownNodes(event.target);
+});
 
 document.addEventListener("click", (event) => {
   if (!(event.target instanceof HTMLElement)) return;

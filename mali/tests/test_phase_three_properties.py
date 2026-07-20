@@ -7,7 +7,7 @@ from mali.desk import TutorDesk
 from mali.ids import checkpoint_id, learner_id, skill_code
 from mali.journal import Journal
 from mali.plans import ProgressWrite
-from mali.policy import POLICY_V1
+from mali.policy import POLICY_V2
 from mali.progress import Progress
 from mali.rules import Refused
 from mali.snapshot import Snapshot
@@ -26,7 +26,7 @@ def test_target_plans_preserve_valid_progress(placed: bool) -> None:
         0,
         curriculum,
     )
-    snapshot = Snapshot(progress, None, POLICY_V1, checkpoint_id("property-check"))
+    snapshot = Snapshot(progress, None, POLICY_V2, checkpoint_id("property-check"))
     outcome = TutorDesk.plan(
         ProposeTarget(skill_code("parts")), snapshot, Actor.STUDENT
     )

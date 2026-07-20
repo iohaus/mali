@@ -15,7 +15,7 @@ from mali.actions import (
 from mali.curriculum import Curriculum, Skill
 from mali.desk import TutorDesk
 from mali.ids import LearnerId, learner_id, skill_code
-from mali.policy import POLICY_V1
+from mali.policy import POLICY_V2
 from mali.snapshot import Snapshot
 from mali.templates import AnswerType, ParameterDomain, QuestionTemplate
 
@@ -72,7 +72,9 @@ def _require_snapshot(
     return snapshot
 
 
-def _answer_open_question(store: SQLiteRecordStore, learner: LearnerId) -> Snapshot:
+def _answer_open_question(
+    store: SQLiteRecordStore, learner: LearnerId, *, correctly: bool = True
+) -> Snapshot:
     before = store.snapshot(learner)
     assert before.checkpoint is not None
     skill = (
@@ -92,8 +94,9 @@ def _answer_open_question(store: SQLiteRecordStore, learner: LearnerId) -> Snaps
         for question in after_question.checkpoint.questions
         if question.answer is None
     )
+    answer = question.instance.key if correctly else "999"
     answered = store.execute(
-        learner, RecordAnswer(question.identifier, question.instance.key), Actor.STUDENT
+        learner, RecordAnswer(question.identifier, answer), Actor.STUDENT
     )
     return _require_snapshot(answered.status, answered.snapshot)
 
@@ -121,16 +124,17 @@ def test_record_store_commits_a_complete_deterministic_learning_flow(
 
     started = store.execute(learner, StartPlacement(), Actor.ENGINE)
     _require_snapshot(started.status, started.snapshot)
-    for _ in range(POLICY_V1.question_budget):
-        _answer_open_question(store, learner)
+    for _ in range(POLICY_V2.question_budget):
+        _answer_open_question(store, learner, correctly=False)
     placed = _run_engine(store, learner)
     assert placed.progress.placed
+    assert placed.progress.mask == 0
 
     target = store.execute(learner, ProposeTarget(skill_code("parts")), Actor.STUDENT)
     _require_snapshot(target.status, target.snapshot)
     started_check = store.execute(learner, StartCheck(), Actor.ENGINE)
     _require_snapshot(started_check.status, started_check.snapshot)
-    for _ in range(POLICY_V1.pass_rule.needed):
+    for _ in range(POLICY_V2.pass_rule.needed):
         _answer_open_question(store, learner)
     completed = _run_engine(store, learner)
 
@@ -233,6 +237,24 @@ def test_adoption_is_refused_while_a_check_is_open(tmp_path: Path) -> None:
         )
 
 
+def test_placement_certifies_skills_the_learner_demonstrates(
+    tmp_path: Path,
+) -> None:
+    store = _store(str(tmp_path / "ace.db"))
+    learner = learner_id("ace-learner")
+    _register_with_curriculum(store, learner, "Ada")
+
+    started = store.execute(learner, StartPlacement(), Actor.ENGINE)
+    _require_snapshot(started.status, started.snapshot)
+    for _ in range(POLICY_V2.question_budget):
+        _answer_open_question(store, learner)
+    placed = _run_engine(store, learner)
+
+    assert placed.progress.placed
+    assert placed.progress.mask == 1
+    assert store.audit(learner).valid
+
+
 def test_switching_curricula_keeps_each_record_separate_and_audit_clean(
     tmp_path: Path,
 ) -> None:
@@ -242,7 +264,7 @@ def test_switching_curricula_keeps_each_record_separate_and_audit_clean(
 
     started = store.execute(learner, StartPlacement(), Actor.ENGINE)
     _require_snapshot(started.status, started.snapshot)
-    for _ in range(POLICY_V1.question_budget):
+    for _ in range(POLICY_V2.question_budget):
         _answer_open_question(store, learner)
     placed = _run_engine(store, learner)
     assert placed.progress.placed
@@ -316,3 +338,22 @@ def test_conflicting_expected_versions_commit_once_and_report_a_stale_record(
         assert entries[0] == 1
     finally:
         connection.close()
+
+
+def test_assumed_skills_are_saved_with_the_adopted_curriculum(
+    tmp_path: Path,
+) -> None:
+    store = _store(str(tmp_path / "assumed.db"))
+    learner = learner_id("assumed-learner")
+    store.register(learner, "Ada")
+    adopted = store.adopt_curriculum(
+        learner,
+        _curriculum(),
+        title="Parts practice",
+        summary="Understand equal parts one step at a time.",
+        assumed=("parts",),
+    )
+
+    version = adopted.progress.curriculum_version
+    assert store.assumed_skill_codes(version) == frozenset({"parts"})
+    assert store.assumed_skill_codes("unknown-version") == frozenset()

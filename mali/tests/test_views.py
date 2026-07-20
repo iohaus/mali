@@ -3,7 +3,7 @@ from mali.checkpoint import CheckPoint, CheckPointKind, Question
 from mali.curriculum import Curriculum, Skill
 from mali.desk import TutorDesk
 from mali.ids import checkpoint_id, learner_id, question_id, skill_code
-from mali.policy import POLICY_V1
+from mali.policy import POLICY_V2
 from mali.progress import Progress
 from mali.rules import Refused
 from mali.snapshot import Snapshot
@@ -31,7 +31,7 @@ def test_product_views_report_only_learner_facts() -> None:
     progress = Progress(
         learner_id("view-learner"), curriculum.version, 0, True, None, 0, curriculum
     )
-    snapshot = Snapshot(progress, None, POLICY_V1, checkpoint_id("view-check"))
+    snapshot = Snapshot(progress, None, POLICY_V2, checkpoint_id("view-check"))
     plan = TutorDesk.plan(ProposeTarget(skill_code("parts")), snapshot, Actor.STUDENT)
     assert not isinstance(plan, Refused)
 
@@ -66,7 +66,7 @@ def test_instructor_context_excludes_open_checkpoint_keys_and_other_skills() -> 
             add.code,
             (open_question,),
         ),
-        POLICY_V1,
+        POLICY_V2,
         None,
     )
     context = instructor_context(

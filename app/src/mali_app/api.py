@@ -40,7 +40,7 @@ from mali_app.store import (
     StoreError,
 )
 from mali_app.store_types import ExecutionResult, ExecutionStatus
-from mali_app.web import install_web_routes
+from mali_app.web import install_web_routes, placement_probe
 
 _DEFAULT_DATABASE = "mali.db"
 _LOG = logging.getLogger(__name__)
@@ -194,10 +194,14 @@ def create_app(
         }
 
     def start_placement(learner: str) -> dict[str, object]:
+        _LOG.info("start placement learner=%s", learner)
         identifier = _learner_or_error(learner)
         _snapshot_or_error(store, learner)
         result = _execute_or_error(store, identifier, StartPlacement(), Actor.ENGINE)
-        return _progress_response(_committed_snapshot(result))
+        progress = _progress_response(_committed_snapshot(result))
+        _LOG.debug("placement started learner=%s progress=%s", learner, progress
+        )
+        return progress
 
     def propose_target(learner: str, skill: str) -> dict[str, object]:
         identifier = _learner_or_error(learner)
@@ -359,6 +363,7 @@ def _execute_or_error(
     action: Action,
     actor: Actor,
 ) -> ExecutionResult:
+    _LOG.debug("execute action=%s learner=%s actor=%s", action, learner, actor)
     try:
         result = store.execute(learner, action, actor)
     except (LearnerNotFound, StoreError) as error:
@@ -392,10 +397,9 @@ def _ensure_question(
         return snapshot
     skill = checkpoint.target
     if skill is None:
-        ready = snapshot.progress.curriculum.next_up(snapshot.progress.mask)
-        if not ready:
+        skill = placement_probe(snapshot, checkpoint)
+        if skill is None:
             return snapshot
-        skill = ready[0].code
     result = _execute_or_error(
         store, learner, AskQuestion(skill, len(checkpoint.questions)), Actor.ENGINE
     )

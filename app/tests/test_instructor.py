@@ -280,22 +280,22 @@ def _place_and_target(client: TestClient, database: str, learner: str) -> None:
     _adopt_demo_curriculum(database, learner)
     assert client.post(f"/v1/learners/{learner}/placement").status_code == 200
     for _ in range(5):
-        _answer_current_question(client, learner)
+        _answer_current_question(client, learner, correctly=False)
     assert client.get(f"/v1/learners/{learner}/progress").json()["placed"]
     targeted = client.post(f"/v1/learners/{learner}/targets/equal-halves")
     assert targeted.status_code == 200
 
 
-def _answer_current_question(client: TestClient, learner: str) -> None:
+def _answer_current_question(
+    client: TestClient, learner: str, *, correctly: bool = True
+) -> None:
     question = client.get(f"/v1/learners/{learner}/question")
     assert question.status_code == 200
     payload = question.json()
+    answer = _answer_for(payload["prompt"]) if correctly else "999"
     response = client.post(
         f"/v1/learners/{learner}/answers",
-        json={
-            "question_id": payload["question_id"],
-            "answer": _answer_for(payload["prompt"]),
-        },
+        json={"question_id": payload["question_id"], "answer": answer},
     )
     assert response.status_code == 200
 
@@ -319,7 +319,7 @@ def _assert_trace_rows(database: str, *, expected_outcomes: tuple[str, ...]) -> 
         ).fetchall()
     finally:
         connection.close()
-    assert [row[1:3] for row in rows] == [("instructor_v1", "v1")] * len(rows)
+    assert [row[1:3] for row in rows] == [("instructor_v1", "v2")] * len(rows)
     assert [row[3] for row in rows] == list(expected_outcomes)
     assert all(row[0] in {"fixture:instructor", "static"} for row in rows)
 

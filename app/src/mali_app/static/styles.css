@@ -104,10 +104,16 @@ input:focus { outline: 3px solid #b4dfc8; outline-offset: 1px; }
 .card-heading { display: flex; align-items: start; justify-content: space-between; gap: 1rem; }
 .card-heading h1 { margin: .3rem 0 0; font-size: clamp(1.5rem, 4vw, 2.25rem); line-height: 1.15; }
 .learner-label { border-radius: 999px; padding: .25rem .6rem; color: var(--muted); background: #f0f3ef; font-size: .8rem; }
-.lesson-messages { display: grid; gap: .75rem; min-height: 8rem; margin: 1.4rem 0; }
+.lesson-messages { display: grid; gap: .75rem; min-height: 8rem; max-height: min(24rem, 50vh); margin: 1.4rem 0; overflow-y: auto; align-content: start; }
 .message { max-width: 90%; border-radius: 1rem 1rem 1rem .25rem; padding: .75rem 1rem; }
 .message p { margin: 0; white-space: pre-wrap; }
 .tutor-message { background: var(--green-soft); }
+.tutor-message p + p { margin-top: 0.5rem; }
+.tutor-message ul, .tutor-message ol { margin: 0.5rem 0; padding-left: 1.25rem; }
+.tutor-message li { margin-bottom: 0.25rem; }
+.tutor-message code { font-family: monospace; font-size: 0.9em; background: rgba(29, 43, 35, 0.08); padding: 0.1rem 0.3rem; border-radius: 0.25rem; }
+.tutor-message pre { background: rgba(29, 43, 35, 0.08); padding: 0.5rem 0.75rem; border-radius: 0.5rem; overflow-x: auto; margin: 0.5rem 0; }
+.tutor-message pre code { background: none; padding: 0; font-size: 0.85em; }
 .student-message { justify-self: end; border-radius: 1rem 1rem .25rem 1rem; background: var(--gold-soft); }
 .lesson-form { display: flex; gap: .6rem; }
 .lesson-form input { min-width: 0; }
@@ -159,8 +165,12 @@ input:focus { outline: 3px solid #b4dfc8; outline-offset: 1px; }
 .skill-actions h3 { flex-basis: 100%; }
 .skill-button { background: var(--gold); }
 .skill-button:hover { background: #9d5d1b; }
-.skill-button-later { color: var(--ink); background: #eef0ec; }
-.skill-button-later:hover { background: #dce4dd; }
+.skill-button-later:disabled { color: var(--muted); background: #eef0ec; cursor: not-allowed; opacity: .75; }
+.assumed-badge {
+  display: inline-block; padding: .05rem .45rem; border: 1px solid var(--gold);
+  border-radius: 999px; color: var(--gold); background: var(--gold-soft);
+  font-size: .68rem; font-weight: 700; letter-spacing: .02em; vertical-align: middle;
+}
 
 .teacher-shell { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
 .teacher-heading { margin: 1.3rem 0 2rem; }

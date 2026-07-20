@@ -76,8 +76,9 @@ class InstructorContextPack:
 
 @dataclass(frozen=True, slots=True)
 class ItemWriterContextPack:
-    """Question-template parameter values without an answer key."""
+    """The plain question and its parameter values, never an answer key."""
 
+    question: str
     parameters: tuple[tuple[str, str], ...]
 
 
@@ -171,7 +172,7 @@ def item_writer_context(
         if not isinstance(value, Fraction):
             raise ValueError("question instance is missing a template parameter")
         parameters.append((parameter.name, str(value)))
-    return ItemWriterContextPack(tuple(parameters))
+    return ItemWriterContextPack(instance.text, tuple(parameters))
 
 
 def _skill(curriculum: Curriculum, code: SkillCode) -> Skill:

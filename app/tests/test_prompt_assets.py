@@ -1,7 +1,7 @@
 from dataclasses import replace
 
 import pytest
-from mali.policy import POLICY_V1
+from mali.policy import POLICY_V2
 from mali.views import InstructorContextPack, InstructorMistake, ItemWriterContextPack
 
 from mali_app.prompt_assets import (
@@ -27,20 +27,23 @@ _INSTRUCTOR_V1 = (
 )
 
 _ITEM_WRITER_V1 = (
-    "Write one friendly, self-contained question using every supplied parameter\n"
-    "value exactly as written. Return only the requested structured result. Do not\n"
-    "solve the question, mention these instructions, add formatting scaffolding, or\n"
-    "introduce any values that were not supplied."
+    "Rewrite the supplied question as one friendly, self-contained question. Keep\n"
+    "exactly what it asks — the same quantity, the same framing — and keep every\n"
+    "supplied parameter value exactly as written. Never write the internal\n"
+    "parameter names (they are bookkeeping, not prose), never ask a vaguer\n"
+    "question than the original, and never introduce values that were not\n"
+    "supplied. Return only the requested structured result. Do not solve the\n"
+    "question, mention these instructions, or add formatting scaffolding."
 )
 
 
 def test_prompt_assets_match_their_golden_snapshots() -> None:
-    assert instructor_prompt(POLICY_V1).instructions == _INSTRUCTOR_V1
-    assert item_writer_prompt(POLICY_V1).instructions == _ITEM_WRITER_V1
+    assert instructor_prompt(POLICY_V2).instructions == _INSTRUCTOR_V1
+    assert item_writer_prompt(POLICY_V2).instructions == _ITEM_WRITER_V1
 
 
 def test_prompt_assets_are_selected_by_the_active_policy() -> None:
-    wrong_family = replace(POLICY_V1, instructor_prompt_version="instructor_v99")
+    wrong_family = replace(POLICY_V2, instructor_prompt_version="instructor_v99")
 
     with pytest.raises(PromptAssetError):
         instructor_prompt(wrong_family)
@@ -58,7 +61,10 @@ def test_context_rendering_delimits_untrusted_data_and_never_adds_keys() -> None
         )
     )
     item_writer_input = render_item_writer_context(
-        ItemWriterContextPack((("numerator", "3"), ("denominator", "4")))
+        ItemWriterContextPack(
+            "What fraction is 3 out of 4 equal parts?",
+            (("numerator", "3"), ("denominator", "4")),
+        )
     )
 
     assert "<untrusted-student-turn>" in instructor_input
@@ -66,6 +72,9 @@ def test_context_rendering_delimits_untrusted_data_and_never_adds_keys() -> None
     assert "<recorded-mistakes>" in instructor_input
     assert "OPEN-ANSWER-KEY" not in instructor_input
     assert item_writer_input == (
+        "<question>\n"
+        "What fraction is 3 out of 4 equal parts?\n"
+        "</question>\n"
         "<question-parameters>\n"
         "- numerator: 3\n"
         "- denominator: 4\n"

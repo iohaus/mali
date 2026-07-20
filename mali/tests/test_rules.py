@@ -2,7 +2,7 @@ from mali.actions import Actor, OverrideMastery, ProposeTarget, TeachEpisode
 from mali.checkpoint import Answer, CheckPoint, CheckPointKind, Question
 from mali.curriculum import Curriculum, Skill
 from mali.ids import checkpoint_id, learner_id, question_id, skill_code
-from mali.policy import POLICY_V1
+from mali.policy import POLICY_V2
 from mali.progress import Progress
 from mali.rules import (
     Allowed,
@@ -71,7 +71,7 @@ def test_engine_prioritizes_a_decided_mastery_check() -> None:
             instance,
             Answer(instance.key, True),
         )
-        for index in range(POLICY_V1.pass_rule.needed)
+        for index in range(POLICY_V2.pass_rule.needed)
     )
     checkpoint = CheckPoint(
         checkpoint_id("rule-check"),
@@ -79,4 +79,4 @@ def test_engine_prioritizes_a_decided_mastery_check() -> None:
         skill_code("parts"),
         questions,
     )
-    assert next_engine_action(checkpoint, POLICY_V1).__class__.__name__ == "PassCheck"
+    assert next_engine_action(checkpoint, POLICY_V2).__class__.__name__ == "PassCheck"

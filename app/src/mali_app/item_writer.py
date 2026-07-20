@@ -1,5 +1,6 @@
 """Validated, bounded model rendering for deterministic question instances."""
 
+import re
 from dataclasses import dataclass
 
 from mali.policy import TutorPolicy
@@ -110,6 +111,23 @@ def _accept_rendering(instance: QuestionInstance, text: str) -> None:
     verdict = validate_rendering(instance, text)
     if not verdict.accepted:
         raise RenderingRejected(verdict.reason or "question rendering was rejected")
+    _reject_internal_names(instance, text)
+
+
+def _reject_internal_names(instance: QuestionInstance, text: str) -> None:
+    """Refuse prose that recites bookkeeping parameter names to the learner.
+
+    Single-letter names are skipped: they collide with ordinary words and the
+    cost of a miss is only a plainer question, while a false rejection would
+    discard a good rendering.
+    """
+    for name, _ in instance.values:
+        if len(name) < 2:
+            continue
+        if re.search(rf"\b{re.escape(name)}\b", text, flags=re.IGNORECASE):
+            raise RenderingRejected(
+                f"question rendering recites the internal name {name!r}"
+            )
 
 
 def _retry_input(input_text: str, reason: str) -> str:

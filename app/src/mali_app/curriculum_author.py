@@ -30,10 +30,18 @@ _MAX_RANGE_SIZE = 40
 _MIN_QUESTION_VARIANTS = 8
 _MAX_QUESTION_VARIANTS = 10_000
 _MAX_SCHEMA_ERROR_DETAILS = 5
-_ANSWER_FORMS = {"integer": AnswerType.INTEGER, "fraction": AnswerType.FRACTION}
+_ANSWER_FORMS = {
+    "integer": AnswerType.INTEGER,
+    "fraction": AnswerType.FRACTION,
+    "choice": AnswerType.CHOICE,
+}
+_MIN_CHOICE_OPTIONS = 2
+_MAX_CHOICE_OPTIONS = 6
+_MAX_CHOICE_OPTION_LENGTH = 60
 _EXAMPLE_SKILL: dict[str, object] = {
     "code": "greeting-practice",
     "title": "Everyday Greetings",
+    "assumed": False,
     "explanation": (
         "Spanish speakers choose a greeting to match the time of day. "
         "Buenos dias works in the morning, buenas tardes in the afternoon, "
@@ -63,6 +71,11 @@ Turn the learner's topic into 3 to 6 small ordered skills. For each skill provid
 (under 900 characters).
 - requires: codes of skills that must come first (earliest skills use an empty \
 list; never form a cycle). Always include this field.
+- assumed: true only for a foundation skill the learner should already have \
+before starting this topic. If the topic presumes prior knowledge, begin with \
+1 or 2 such foundation skills and let the first real skills require them; for \
+truly introductory topics, mark none. Foundations are checked first so the \
+learner can skip what they already know.
 - question: one auto-gradable practice pattern:
   - story: the question text, under 280 characters. Reference every parameter \
 with {name} placeholders (every parameter must appear). Curly braces are \
@@ -79,7 +92,18 @@ answer must be a number computed by plain arithmetic. For an answer that is a \
 simplified fraction, use answer_form "fraction" with a rule like n / d; Mali \
 reduces it automatically.
   - answer_form: exactly "integer" when the rule always yields whole numbers, \
-otherwise exactly "fraction".
+"fraction" when it can yield parts, or "choice" for a labelled-options \
+question.
+  - choice questions: add options, a list of 2 to 6 short labels, and make \
+answer_rule compute the POSITION of the correct label counting from 0. The \
+parameter ranges must still allow at least 8 different questions, so use % \
+or // to map a wide range onto the option positions. Example: story "It is \
+{h}:00 on a 24-hour clock. Which part of the day is it?", parameters h from \
+0 to 23, options ["morning","afternoon","evening"], answer_rule "h // 8". \
+Only choice questions may have options.
+Vary the question forms across skills — counting, conversions, remainders, \
+comparisons phrased as counts, labelled choices — not the same fill-in \
+computation every time.
 Here is one complete skill, exactly in the expected shape:
 """
     + json.dumps(_EXAMPLE_SKILL, separators=(",", ":"))
@@ -112,6 +136,7 @@ class _QuestionDraft(BaseModel):
     answer_rule: str = Field(min_length=1, max_length=120)
     answer_form: str
     parameters: list[_ParameterDraft] = Field(min_length=1, max_length=4)
+    options: list[str] = Field(default_factory=list, max_length=6)
 
 
 class _SkillDraft(BaseModel):
@@ -122,6 +147,7 @@ class _SkillDraft(BaseModel):
     explanation: str = Field(min_length=20, max_length=1_800)
     requires: list[str] = Field(default_factory=list, max_length=4)
     question: _QuestionDraft
+    assumed: bool = False
 
 
 class _CurriculumDraft(BaseModel):
@@ -141,6 +167,7 @@ class AuthoredCurriculum:
     summary: str
     curriculum: Curriculum
     model: str
+    assumed_codes: tuple[str, ...]
 
 
 class CurriculumAuthor:
@@ -228,6 +255,11 @@ class CurriculumAuthor:
                 _clean_text(draft.summary, 8, 320, "curriculum summary"),
                 curriculum,
                 gateway.identity.trace_label,
+                tuple(
+                    skill_draft.code
+                    for skill_draft in draft.skills
+                    if skill_draft.assumed
+                ),
             )
         raise AssertionError("bounded authoring loop must return or raise")
 
@@ -292,16 +324,26 @@ def _request_input(topic: str, repair_reason: str | None, *, final: bool) -> str
 
 def _certified_curriculum(draft: _CurriculumDraft) -> Curriculum:
     """Translate one draft into core types, which validate every rule."""
+    ordered = _foundations_first(draft)
     skills = tuple(
         _certified_skill(index, skill_draft)
-        for index, skill_draft in enumerate(draft.skills)
+        for index, skill_draft in enumerate(ordered)
     )
     requirements = tuple(
         (skill_draft.code, tuple(skill_draft.requires))
-        for skill_draft in draft.skills
+        for skill_draft in ordered
         if skill_draft.requires
     )
     return Curriculum.load(skills, requirements)
+
+
+def _foundations_first(draft: _CurriculumDraft) -> tuple[_SkillDraft, ...]:
+    """Order assumed prior-knowledge skills ahead of the topic's own skills.
+
+    Placement probes skills in curriculum order, so the foundations a learner
+    may already have must come first for the check to start there.
+    """
+    return tuple(sorted(draft.skills, key=lambda skill: not skill.assumed))
 
 
 def _certified_skill(index: int, skill_draft: _SkillDraft) -> Skill:
@@ -334,11 +376,40 @@ def _question_template(skill_draft: _SkillDraft) -> QuestionTemplate:
     story = _normalized_story(skill_draft.code, question.story)
     _require_known_placeholders(skill_draft.code, story, question.parameters)
     return QuestionTemplate(
-        _normalized_domains(skill_draft.code, question.parameters),
+        _normalized_domains(
+            skill_draft.code,
+            question.parameters,
+            growable=answer_type is not AnswerType.CHOICE,
+        ),
         _normalized_rule(skill_draft.code, question.answer_rule),
         story,
         answer_type,
+        options=_choice_options(skill_draft.code, question, answer_type),
     )
+
+
+def _choice_options(
+    code: str, question: _QuestionDraft, answer_type: AnswerType
+) -> tuple[str, ...]:
+    """Validate the labelled options a choice question offers."""
+    cleaned = tuple(option.strip() for option in question.options)
+    if answer_type is not AnswerType.CHOICE:
+        if cleaned:
+            raise ValueError(f"skill {code!r} options belong only to choice questions")
+        return ()
+    if not _MIN_CHOICE_OPTIONS <= len(cleaned) <= _MAX_CHOICE_OPTIONS:
+        raise ValueError(
+            f"skill {code!r} choice questions need {_MIN_CHOICE_OPTIONS} to "
+            f"{_MAX_CHOICE_OPTIONS} options"
+        )
+    if any(not option or len(option) > _MAX_CHOICE_OPTION_LENGTH for option in cleaned):
+        raise ValueError(
+            f"skill {code!r} every option needs 1 to "
+            f"{_MAX_CHOICE_OPTION_LENGTH} characters"
+        )
+    if len({option.lower() for option in cleaned}) != len(cleaned):
+        raise ValueError(f"skill {code!r} options must be distinct")
+    return cleaned
 
 
 def _normalized_rule(code: str, rule: str) -> str:
@@ -402,9 +473,14 @@ def _require_known_placeholders(
 
 
 def _normalized_domains(
-    code: str, parameters: list[_ParameterDraft]
+    code: str, parameters: list[_ParameterDraft], *, growable: bool = True
 ) -> tuple[ParameterDomain, ...]:
-    """Clamp drafted integer ranges into the verified variant window."""
+    """Clamp drafted integer ranges into the verified variant window.
+
+    Choice questions are never grown: widening a range would push the
+    position rule past its options, so a too-small choice range is rejected
+    with a reason the model can repair from instead.
+    """
     bounds: list[tuple[str, int, int]] = []
     for parameter in parameters:
         low = min(parameter.lowest, parameter.highest)
@@ -426,6 +502,11 @@ def _normalized_domains(
             name,
             low,
             low + max(_MIN_RANGE_SIZE, _size(bounds[index]) // 2) - 1,
+        )
+    if not growable and variant_count() < _MIN_QUESTION_VARIANTS:
+        raise ValueError(
+            f"skill {code!r} choice question needs parameter ranges covering "
+            f"at least {_MIN_QUESTION_VARIANTS} combinations"
         )
     for index in range(len(bounds) - 1, -1, -1):
         if variant_count() >= _MIN_QUESTION_VARIANTS:

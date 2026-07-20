@@ -27,7 +27,7 @@ def test_open_database_enables_wal_and_creates_the_record_schema() -> None:
             "teaching_trace",
         } <= tables
         assert "learning_path" not in tables
-        assert version == (5,)
+        assert version == (6,)
     finally:
         connection.close()
 
@@ -37,7 +37,7 @@ def test_migrations_are_idempotent() -> None:
     try:
         apply_migrations(connection)
         apply_migrations(connection)
-        assert connection.execute("PRAGMA user_version").fetchone() == (5,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (6,)
     finally:
         connection.close()
 
@@ -64,6 +64,7 @@ def test_migration_renames_the_checkpoint_archive_column() -> None:
         )
         connection.execute("CREATE TABLE learner (id TEXT PRIMARY KEY)")
         connection.execute("CREATE TABLE curriculum (version TEXT PRIMARY KEY)")
+        connection.execute("CREATE TABLE skill (curriculum_version TEXT, code TEXT)")
         connection.execute(
             "CREATE TABLE progress (learner TEXT, curriculum_version TEXT)"
         )
@@ -82,5 +83,9 @@ def test_migration_renames_the_checkpoint_archive_column() -> None:
             row[1] for row in connection.execute("PRAGMA table_info(learner)")
         }
         assert "active_curriculum" in learner_columns
+        skill_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(skill)")
+        }
+        assert "assumed" in skill_columns
     finally:
         connection.close()

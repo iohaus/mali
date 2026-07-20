@@ -4,7 +4,7 @@ from mali.curriculum import Curriculum, Skill
 from mali.desk import TutorDesk
 from mali.ids import checkpoint_id, learner_id, skill_code
 from mali.plans import CheckPointWrite, ProgressWrite
-from mali.policy import POLICY_V1
+from mali.policy import POLICY_V2
 from mali.progress import Progress
 from mali.rules import RefusalReason, Refused
 from mali.snapshot import Snapshot
@@ -18,7 +18,7 @@ def _snapshot(placed: bool = True) -> Snapshot:
     progress = Progress(
         learner_id("desk-learner"), curriculum.version, 0, placed, None, 0, curriculum
     )
-    return Snapshot(progress, None, POLICY_V1, checkpoint_id("desk-check"))
+    return Snapshot(progress, None, POLICY_V2, checkpoint_id("desk-check"))
 
 
 def test_plan_rechecks_rules_before_producing_writes() -> None:
@@ -58,7 +58,7 @@ def test_question_and_answer_plans_preserve_the_canonical_answer() -> None:
     checkpoint = CheckPoint(
         checkpoint_id("answer-check"), CheckPointKind.PLACEMENT, None, ()
     )
-    snapshot = Snapshot(progress, checkpoint, POLICY_V1, None)
+    snapshot = Snapshot(progress, checkpoint, POLICY_V2, None)
     asked = TutorDesk.plan(AskQuestion(skill.code, 7), snapshot, Actor.ENGINE)
     assert not isinstance(asked, Refused)
     write = asked.writes[0]
@@ -68,7 +68,7 @@ def test_question_and_answer_plans_preserve_the_canonical_answer() -> None:
 
     answered = TutorDesk.plan(
         RecordAnswer(question.identifier, f"  {question.instance.key}  "),
-        Snapshot(progress, write.checkpoint, POLICY_V1, None),
+        Snapshot(progress, write.checkpoint, POLICY_V2, None),
         Actor.STUDENT,
     )
     assert not isinstance(answered, Refused)

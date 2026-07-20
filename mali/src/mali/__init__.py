@@ -3,7 +3,7 @@
 from mali.curriculum import Curriculum, Skill
 from mali.estimate import PlacementEstimate
 from mali.ids import CheckPointId, LearnerId, QuestionId, SkillCode
-from mali.policy import POLICY_V1, TutorPolicy
+from mali.policy import POLICY_V2, TutorPolicy
 from mali.templates import AnswerType, QuestionInstance, QuestionTemplate
 
 __all__ = [
@@ -14,7 +14,7 @@ __all__ = [
     "QuestionId",
     "QuestionInstance",
     "QuestionTemplate",
-    "POLICY_V1",
+    "POLICY_V2",
     "PlacementEstimate",
     "Skill",
     "SkillCode",

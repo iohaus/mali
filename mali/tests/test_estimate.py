@@ -7,7 +7,7 @@ from mali.checkpoint import Question
 from mali.curriculum import Curriculum, Skill
 from mali.estimate import PlacementEstimate
 from mali.ids import question_id, skill_code
-from mali.policy import POLICY_V1
+from mali.policy import POLICY_V2
 from mali.templates import AnswerType, ParameterDomain, QuestionTemplate
 
 
@@ -34,10 +34,10 @@ def _question(code: str) -> Question:
 def test_estimate_updates_exactly_and_selects_deterministically() -> None:
     curriculum = _curriculum()
     estimate = PlacementEstimate.uniform(curriculum)
-    updated = estimate.updated(_question("one"), True, curriculum, POLICY_V1)
+    updated = estimate.updated(_question("one"), True, curriculum, POLICY_V2)
 
     assert sum(weight for _, weight in updated.weights) == 1
-    assert updated.pick_question(curriculum, POLICY_V1) == "two"
+    assert updated.pick_question(curriculum, POLICY_V2) == "two"
     assert updated.certified_mask() in curriculum.reachable_masks
     assert all(isinstance(weight, Fraction) for _, weight in updated.weights)
 
@@ -46,7 +46,7 @@ def test_no_informative_question_means_one_mask_has_all_weight() -> None:
     curriculum = _curriculum()
     estimate = PlacementEstimate(((3, Fraction(1)),))
 
-    assert estimate.pick_question(curriculum, POLICY_V1) is None
+    assert estimate.pick_question(curriculum, POLICY_V2) is None
     assert estimate.certified_mask() == 3
 
 
@@ -57,11 +57,11 @@ def test_estimate_stays_normalized_and_non_negative(verdicts: list[bool]) -> Non
     question = _question("one")
 
     for verdict in verdicts:
-        estimate = estimate.updated(question, verdict, curriculum, POLICY_V1)
+        estimate = estimate.updated(question, verdict, curriculum, POLICY_V2)
         assert sum(weight for _, weight in estimate.weights) == 1
         assert all(weight >= 0 for _, weight in estimate.weights)
-        assert estimate.pick_question(curriculum, POLICY_V1) == estimate.pick_question(
-            curriculum, POLICY_V1
+        assert estimate.pick_question(curriculum, POLICY_V2) == estimate.pick_question(
+            curriculum, POLICY_V2
         )
 
 
@@ -73,12 +73,12 @@ def test_placement_run_is_bounded_by_the_policy_budget(verdicts: list[bool]) -> 
     steps = 0
 
     while (
-        estimate.pick_question(curriculum, POLICY_V1) is not None
-        and max(weight for _, weight in estimate.weights) < POLICY_V1.certify_threshold
-        and steps < POLICY_V1.question_budget
+        estimate.pick_question(curriculum, POLICY_V2) is not None
+        and max(weight for _, weight in estimate.weights) < POLICY_V2.certify_threshold
+        and steps < POLICY_V2.question_budget
     ):
         verdict = verdicts[steps] if steps < len(verdicts) else False
-        estimate = estimate.updated(question, verdict, curriculum, POLICY_V1)
+        estimate = estimate.updated(question, verdict, curriculum, POLICY_V2)
         steps += 1
 
-    assert steps <= POLICY_V1.question_budget
+    assert steps <= POLICY_V2.question_budget

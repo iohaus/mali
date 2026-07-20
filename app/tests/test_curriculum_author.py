@@ -358,3 +358,87 @@ def test_remainder_rules_and_four_parameters_are_accepted() -> None:
     template = authored.curriculum.skills[2].template
     assert template is not None
     assert len(template.parameters) == 4
+
+
+def test_choice_questions_build_and_foundations_order_first() -> None:
+    day_parts = {
+        "code": "day-parts",
+        "title": "Parts of the Day",
+        "explanation": (
+            "A 24-hour clock splits the day into three broad stretches. "
+            "Morning runs until 8, afternoon until 16, and evening after."
+        ),
+        "requires": [],
+        "assumed": True,
+        "question": {
+            "story": "It is {h}:00 on a 24-hour clock. Which part of the day is it?",
+            "answer_rule": "h // 8",
+            "answer_form": "choice",
+            "parameters": [{"name": "h", "lowest": 0, "highest": 23}],
+            "options": ["morning", "afternoon", "evening"],
+        },
+    }
+    draft = _draft(
+        [
+            _skill("first-steps", ["day-parts"]),
+            _skill("middle-steps", ["first-steps"]),
+            day_parts,
+        ]
+    )
+    gateway = ScriptedAuthorGateway([draft])
+
+    authored = CurriculumAuthor(gateway).build(LEARNER, "telling time")
+
+    assert authored.assumed_codes == ("day-parts",)
+    assert authored.curriculum.skills[0].code == "day-parts"
+    template = authored.curriculum.skills[0].template
+    assert template is not None
+    assert template.options == ("morning", "afternoon", "evening")
+    instance = template.instance(4)
+    assert instance.key in instance.options
+
+
+def test_choice_rule_outside_its_options_is_named_for_repair() -> None:
+    broken = {
+        **_skill("last-steps", ["middle-steps"]),
+        "question": {
+            "story": "It is {h}:00 on a 24-hour clock. Which part of the day is it?",
+            "answer_rule": "h",
+            "answer_form": "choice",
+            "parameters": [{"name": "h", "lowest": 0, "highest": 23}],
+            "options": ["morning", "afternoon", "evening"],
+        },
+    }
+    draft = _draft(
+        [_skill("first-steps", []), _skill("middle-steps", ["first-steps"]), broken]
+    )
+    gateway = ScriptedAuthorGateway([draft, _good_draft()])
+
+    authored = CurriculumAuthor(gateway).build(LEARNER, "telling time")
+
+    assert len(gateway.inputs) == 2
+    assert "whole number from 0 to 2" in gateway.inputs[1]
+    assert len(authored.curriculum.skills) == 3
+
+
+def test_too_small_choice_ranges_are_rejected_not_grown() -> None:
+    narrow = {
+        **_skill("last-steps", ["middle-steps"]),
+        "question": {
+            "story": "The minute hand made {q} quarter-turns. How much has passed?",
+            "answer_rule": "q - 1",
+            "answer_form": "choice",
+            "parameters": [{"name": "q", "lowest": 1, "highest": 3}],
+            "options": ["a quarter", "half", "three quarters"],
+        },
+    }
+    draft = _draft(
+        [_skill("first-steps", []), _skill("middle-steps", ["first-steps"]), narrow]
+    )
+    gateway = ScriptedAuthorGateway([draft, _good_draft()])
+
+    authored = CurriculumAuthor(gateway).build(LEARNER, "telling time")
+
+    assert len(gateway.inputs) == 2
+    assert "at least 8 combinations" in gateway.inputs[1]
+    assert len(authored.curriculum.skills) == 3

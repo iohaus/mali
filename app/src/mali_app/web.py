@@ -24,9 +24,10 @@ from mali.actions import (
     StartCheck,
     StartPlacement,
 )
-from mali.checkpoint import Question
+from mali.checkpoint import CheckPoint, Question
 from mali.desk import TutorDesk
 from mali.errors import InvalidIdentifier
+from mali.estimate import PlacementEstimate
 from mali.ids import (
     LearnerId,
     QuestionId,
@@ -505,6 +506,12 @@ def _student_context(
     target = current.progress.target
     target_title = _skill_title(current, target) if target is not None else None
     display = store.curriculum_display(current.progress.curriculum_version)
+    assumed_codes = store.assumed_skill_codes(current.progress.curriculum_version)
+    assumed_titles = frozenset(
+        skill.title
+        for skill in current.progress.curriculum.skills
+        if skill.code in assumed_codes
+    )
     ready = current.progress.curriculum.next_up(current.progress.mask)
     ready_codes = {skill.code for skill in ready}
     later_skills = tuple(
@@ -522,6 +529,7 @@ def _student_context(
         "can_rebuild": current.checkpoint is None,
         "next_up_skills": tuple((skill.code, skill.title) for skill in ready),
         "later_skills": later_skills,
+        "assumed_titles": assumed_titles,
         "question": question,
         "progress": mapped,
         "placed": current.progress.placed,
@@ -546,10 +554,9 @@ def _active_question(
             return snapshot, None
         skill = checkpoint.target
         if skill is None:
-            ready = snapshot.progress.curriculum.next_up(snapshot.progress.mask)
-            if not ready:
+            skill = placement_probe(snapshot, checkpoint)
+            if skill is None:
                 return snapshot, None
-            skill = ready[0].code
         result = store.execute(
             learner, AskQuestion(skill, len(checkpoint.questions)), Actor.ENGINE
         )
@@ -601,6 +608,23 @@ def _answer_was_correct(snapshot: Snapshot, identifier: QuestionId) -> bool:
     return (
         question is not None and question.answer is not None and question.answer.correct
     )
+
+
+def placement_probe(snapshot: Snapshot, checkpoint: CheckPoint) -> SkillCode | None:
+    """Pick the most informative skill for the next placement question.
+
+    Folds the graded answers so far into a picture of what the learner
+    likely knows, then asks about the skill whose answer would tell us the
+    most. Falls back to the first ready skill when every remaining skill is
+    already decided, so the fixed question budget is still honored.
+    """
+    picked = PlacementEstimate.from_answers(
+        checkpoint.questions, snapshot.progress.curriculum, snapshot.policy
+    ).pick_question(snapshot.progress.curriculum, snapshot.policy)
+    if picked is not None:
+        return skill_code(picked)
+    ready = snapshot.progress.curriculum.next_up(snapshot.progress.mask)
+    return ready[0].code if ready else None
 
 
 def _status_copy(
@@ -666,6 +690,7 @@ def _curriculum_events(
             authored.curriculum,
             title=authored.title,
             summary=authored.summary,
+            assumed=authored.assumed_codes,
         )
     except CurriculumBuildError as error:
         yield _named_sse_event("status", {"state": "error", "text": str(error)})
@@ -703,12 +728,17 @@ def _curriculum_error_events(text: str) -> Iterator[str]:
 
 def _curriculum_payload(authored: AuthoredCurriculum) -> dict[str, object]:
     """Expose only the freshly adopted curriculum's display fields."""
+    assumed = set(authored.assumed_codes)
     return {
         "topic": authored.topic,
         "title": authored.title,
         "summary": authored.summary,
         "steps": [
-            {"title": skill.title, "description": _skill_summary(skill.card)}
+            {
+                "title": skill.title,
+                "description": _skill_summary(skill.card),
+                "assumed": skill.code in assumed,
+            }
             for skill in authored.curriculum.skills
         ],
     }

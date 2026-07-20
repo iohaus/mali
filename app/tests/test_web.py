@@ -194,10 +194,11 @@ def test_student_page_runs_placement_lesson_and_inline_check(tmp_path: Path) -> 
 
     page = client.post("/learners/web-learner/placement")
     for _ in range(5):
-        page = _submit_current_answer(client, "web-learner", page.text)
+        page = _submit_current_answer(client, "web-learner", page.text, correctly=False)
 
     assert "Choose your next step" in page.text
     assert "Equal halves" in page.text
+    assert 'class="skill-button skill-button-later" type="button" disabled' in page.text
     lesson = client.post("/learners/web-learner/targets/equal-halves")
     assert "Great choice" in lesson.text
     assert "data-lesson-url" in lesson.text
@@ -375,12 +376,14 @@ def _place_and_choose_equal_halves(
     _adopt_demo_curriculum(database, learner)
     page = client.post(f"/learners/{learner}/placement")
     for _ in range(5):
-        page = _submit_current_answer(client, learner, page.text)
+        page = _submit_current_answer(client, learner, page.text, correctly=False)
     selected = client.post(f"/learners/{learner}/targets/equal-halves")
     assert "Great choice" in selected.text
 
 
-def _submit_current_answer(client: TestClient, learner: str, page: str):
+def _submit_current_answer(
+    client: TestClient, learner: str, page: str, *, correctly: bool = True
+):
     match = re.search(
         r'name="question_id" value="([^"]+)"[^>]*>\s*'
         r"(?:<[^>]+>\s*)*<p class=\"question-prompt\">([^<]+)</p>",
@@ -394,9 +397,10 @@ def _submit_current_answer(client: TestClient, learner: str, page: str):
         question_id, question_prompt = identifier.group(1), prompt.group(1)
     else:
         question_id, question_prompt = match.group(1), match.group(2)
+    answer = _answer_for(question_prompt) if correctly else "999"
     return client.post(
         f"/learners/{learner}/answers",
-        data={"question_id": question_id, "answer": _answer_for(question_prompt)},
+        data={"question_id": question_id, "answer": answer},
     )
 
 

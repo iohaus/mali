@@ -11,7 +11,7 @@ from mali.actions import (
 from mali.curriculum import Curriculum, Skill
 from mali.desk import TutorDesk
 from mali.ids import learner_id, skill_code
-from mali.policy import POLICY_V1
+from mali.policy import POLICY_V2
 from mali.snapshot import Snapshot
 from mali.templates import AnswerType, ParameterDomain, QuestionTemplate
 
@@ -30,6 +30,7 @@ DEMO_CURRICULUM_SUMMARY = (
     "Build confidence with halves and quarters, one checked step at a time."
 )
 _DEMO_SKILL = skill_code("equal-halves")
+_WRONG_DEMO_ANSWER = "999"
 
 
 def demo_curriculum() -> Curriculum:
@@ -87,7 +88,10 @@ def seed_demo(store: SQLiteRecordStore) -> Snapshot:
         snapshot = _adopt_demo_curriculum(store)
     if not snapshot.progress.placed:
         _committed(store.execute(DEMO_LEARNER, StartPlacement(), Actor.ENGINE))
-        _complete_open_checkpoint(store)
+        # The demo learner starts from zero on purpose: the mastery claim in
+        # the teacher panel must be earned through a recorded check, not
+        # granted by placement.
+        _complete_open_checkpoint(store, correctly=False)
         snapshot = _run_engine(store)
     if snapshot.progress.mask == 0:
         _committed(
@@ -112,13 +116,15 @@ def _adopt_demo_curriculum(store: SQLiteRecordStore) -> Snapshot:
     )
 
 
-def _complete_open_checkpoint(store: SQLiteRecordStore) -> None:
+def _complete_open_checkpoint(
+    store: SQLiteRecordStore, *, correctly: bool = True
+) -> None:
     while True:
         snapshot = store.snapshot(DEMO_LEARNER)
         checkpoint = snapshot.checkpoint
         if checkpoint is None:
             return
-        if len(checkpoint.questions) >= POLICY_V1.question_budget:
+        if len(checkpoint.questions) >= POLICY_V2.question_budget:
             return
         skill = checkpoint.target if checkpoint.target is not None else _DEMO_SKILL
         asked = _committed(
@@ -135,10 +141,11 @@ def _complete_open_checkpoint(store: SQLiteRecordStore) -> None:
             for question in asked.checkpoint.questions
             if question.answer is None
         )
+        answer = question.instance.key if correctly else _WRONG_DEMO_ANSWER
         _committed(
             store.execute(
                 DEMO_LEARNER,
-                RecordAnswer(question.identifier, question.instance.key),
+                RecordAnswer(question.identifier, answer),
                 Actor.STUDENT,
             )
         )

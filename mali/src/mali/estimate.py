@@ -35,6 +35,23 @@ class PlacementEstimate:
         weight = Fraction(1, len(curriculum.reachable_masks))
         return cls(tuple((mask, weight) for mask in curriculum.reachable_masks))
 
+    @classmethod
+    def from_answers(
+        cls,
+        questions: tuple[Question, ...],
+        curriculum: Curriculum,
+        policy: TutorPolicy,
+    ) -> "PlacementEstimate":
+        """Fold every graded answer into one exact placement estimate."""
+        estimate = cls.uniform(curriculum)
+        for question in questions:
+            if question.answer is None:
+                continue
+            estimate = estimate.updated(
+                question, question.answer.correct, curriculum, policy
+            )
+        return estimate
+
     def updated(
         self,
         question: Question,

@@ -32,7 +32,7 @@ from mali.ids import (
 )
 from mali.journal import Journal
 from mali.plans import ActionPlan, CheckPointWrite, JournalEntry, ProgressWrite
-from mali.policy import POLICY_V1, TutorPolicy
+from mali.policy import POLICY_V2, TutorPolicy
 from mali.progress import Progress
 from mali.rules import Refused
 from mali.snapshot import Snapshot
@@ -102,7 +102,7 @@ class SQLiteRecordStore:
     def __init__(
         self,
         path: DatabasePath,
-        policy: TutorPolicy = POLICY_V1,
+        policy: TutorPolicy = POLICY_V2,
         *,
         clock: Clock | None = None,
         fresh: FreshSource | None = None,
@@ -111,6 +111,7 @@ class SQLiteRecordStore:
         self._policy = policy
         self._clock = SystemClock() if clock is None else clock
         self._fresh = SystemFreshSource() if fresh is None else fresh
+        _LOG.info("SQLiteRecordStore initialized database=%s policy=%s", path, policy)
         self._install_configuration()
 
     def register(self, learner: LearnerId, display_name: str) -> None:
@@ -146,6 +147,7 @@ class SQLiteRecordStore:
         *,
         title: str,
         summary: str,
+        assumed: tuple[str, ...] = (),
     ) -> Snapshot:
         """Save a curriculum and make it the learner's active course of study."""
         if not title.strip():
@@ -167,7 +169,9 @@ class SQLiteRecordStore:
                     "finish the current check before changing course"
                 )
             now = self._now()
-            self._save_curriculum(connection, curriculum, title, summary, now)
+            self._save_curriculum(
+                connection, curriculum, title, summary, now, frozenset(assumed)
+            )
             connection.execute(
                 """
                 INSERT INTO progress
@@ -297,6 +301,20 @@ class SQLiteRecordStore:
         finally:
             connection.close()
 
+    def assumed_skill_codes(self, version: str) -> frozenset[str]:
+        """Read which skills of one curriculum are assumed prior knowledge."""
+        connection = self._connection()
+        try:
+            rows = connection.execute(
+                "SELECT code FROM skill WHERE curriculum_version = ? AND assumed = 1",
+                (version,),
+            ).fetchall()
+            return frozenset(_text(row["code"]) for row in rows)
+        except sqlite3.DatabaseError as error:
+            raise StoreError("could not read the assumed skills") from error
+        finally:
+            connection.close()
+
     def curriculum_display(self, version: str) -> CurriculumDisplay:
         """Read the learner-facing title and summary of one saved curriculum."""
         connection = self._connection()
@@ -356,6 +374,8 @@ class SQLiteRecordStore:
                 snapshot = self._load_snapshot(
                     connection, learner, checkpoint_identifier
                 )
+                _LOG.info("loaded snapshot learner=%s", learner)
+                _LOG.debug("snapshot=%s", snapshot)
                 if (
                     expected_version is not None
                     and snapshot.progress.version != expected_version
@@ -788,6 +808,7 @@ class SQLiteRecordStore:
         title: str,
         summary: str,
         now: str,
+        assumed: frozenset[str] = frozenset(),
     ) -> None:
         connection.execute(
             """
@@ -800,8 +821,9 @@ class SQLiteRecordStore:
             connection.execute(
                 """
                 INSERT OR IGNORE INTO skill
-                    (curriculum_version, code, bit_index, title, card, template)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (curriculum_version, code, bit_index, title, card, template,
+                     assumed)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     curriculum.version,
@@ -810,6 +832,7 @@ class SQLiteRecordStore:
                     skill.title,
                     skill.card,
                     _template_payload(skill.template),
+                    1 if skill.code in assumed else 0,
                 ),
             )
         for skill_reference, requirements in curriculum.requirements:
@@ -1349,15 +1372,15 @@ def _policy_from_payload(payload: str) -> TutorPolicy:
             _integer(
                 flow_budget.get(
                     "recent_mistake_limit",
-                    POLICY_V1.flow_budget.recent_mistake_limit,
+                    POLICY_V2.flow_budget.recent_mistake_limit,
                 )
             ),
         ),
         _text(
-            data.get("instructor_prompt_version", POLICY_V1.instructor_prompt_version)
+            data.get("instructor_prompt_version", POLICY_V2.instructor_prompt_version)
         ),
         _text(
-            data.get("item_writer_prompt_version", POLICY_V1.item_writer_prompt_version)
+            data.get("item_writer_prompt_version", POLICY_V2.item_writer_prompt_version)
         ),
     )
 

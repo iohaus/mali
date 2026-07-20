@@ -1,7 +1,7 @@
 from collections.abc import Iterator
 from fractions import Fraction
 
-from mali.policy import POLICY_V1
+from mali.policy import POLICY_V2
 from mali.templates import (
     AnswerType,
     ParameterDomain,
@@ -66,7 +66,7 @@ def test_item_writer_uses_only_params_and_returns_a_valid_structured_rendering()
     template, instance = _question()
     gateway = ScriptedFixtureGateway([ItemWriterResponse(question_text=instance.text)])
 
-    result = ItemWriter(gateway).render(POLICY_V1, template, instance)
+    result = ItemWriter(gateway).render(POLICY_V2, template, instance)
 
     assert result.question_text == instance.text
     assert result.attempts == 1
@@ -84,7 +84,7 @@ def test_item_writer_retries_a_key_leak_then_uses_the_valid_fixture() -> None:
         ]
     )
 
-    result = ItemWriter(gateway).render(POLICY_V1, template, instance)
+    result = ItemWriter(gateway).render(POLICY_V2, template, instance)
 
     assert result.question_text == instance.text
     assert result.attempts == 2
@@ -102,11 +102,11 @@ def test_item_writer_falls_back_after_schema_and_dropped_value_fixtures() -> Non
         ]
     )
 
-    result = ItemWriter(gateway).render(POLICY_V1, template, instance)
+    result = ItemWriter(gateway).render(POLICY_V2, template, instance)
 
     assert result.question_text == instance.text
     assert result.used_fallback
-    assert result.attempts == POLICY_V1.flow_budget.item_writer_retries + 1
+    assert result.attempts == POLICY_V2.flow_budget.item_writer_retries + 1
     assert result.rejection_reasons == (
         "GatewaySchemaViolation",
         "question text omits required values",
@@ -118,7 +118,7 @@ def test_item_writer_falls_back_without_repeating_an_unavailable_gateway() -> No
     template, instance = _question()
     gateway = ScriptedFixtureGateway([GatewayUnavailable("forbidden")])
 
-    result = ItemWriter(gateway).render(POLICY_V1, template, instance)
+    result = ItemWriter(gateway).render(POLICY_V2, template, instance)
 
     assert result.question_text == instance.text
     assert result.used_fallback
