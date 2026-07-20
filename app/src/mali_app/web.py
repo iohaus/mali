@@ -176,6 +176,7 @@ def install_web_routes(
                 "request": request,
                 "learner": identifier,
                 "needs_topic": True,
+                "display_name": store.learner_topics(identifier).display_name,
             }
         except (LearnerNotFound, StoreError):
             return _not_found(templates, request)
@@ -506,6 +507,7 @@ def _student_context(
     target = current.progress.target
     target_title = _skill_title(current, target) if target is not None else None
     display = store.curriculum_display(current.progress.curriculum_version)
+    person = store.learner_topics(learner)
     assumed_codes = store.assumed_skill_codes(current.progress.curriculum_version)
     assumed_titles = frozenset(
         skill.title
@@ -530,6 +532,8 @@ def _student_context(
         "next_up_skills": tuple((skill.code, skill.title) for skill in ready),
         "later_skills": later_skills,
         "assumed_titles": assumed_titles,
+        "display_name": person.display_name,
+        "topics": person.topics,
         "question": question,
         "progress": mapped,
         "placed": current.progress.placed,

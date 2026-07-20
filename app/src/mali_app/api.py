@@ -199,8 +199,7 @@ def create_app(
         _snapshot_or_error(store, learner)
         result = _execute_or_error(store, identifier, StartPlacement(), Actor.ENGINE)
         progress = _progress_response(_committed_snapshot(result))
-        _LOG.debug("placement started learner=%s progress=%s", learner, progress
-        )
+        _LOG.debug("placement started learner=%s progress=%s", learner, progress)
         return progress
 
     def propose_target(learner: str, skill: str) -> dict[str, object]:

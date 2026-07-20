@@ -2,6 +2,15 @@
 
 {% block title %}Mali · Learn{% endblock %}
 
+{% block nav %}
+{% if display_name %}<span class="nav-name">{{ display_name }}</span>{% endif %}
+<a href="/">My topics</a>
+<a href="/teacher">Teacher view</a>
+<form action="/session/switch" method="post" class="nav-form">
+  <button type="submit" class="nav-action">Switch learner</button>
+</form>
+{% endblock %}
+
 {% block content %}
 {% include "partials/student_content.html" %}
 {% endblock %}

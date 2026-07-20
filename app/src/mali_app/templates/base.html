@@ -13,6 +13,7 @@
   <body>
     <header class="site-header">
       <a class="brand" href="/">Mali</a>
+      <nav aria-label="Site">{% block nav %}{% endblock %}</nav>
     </header>
     {% block content %}{% endblock %}
   </body>

@@ -297,7 +297,7 @@ def test_curriculum_build_is_streamed_adopted_and_scoped_to_one_learner(
     assert "<learner-request>\ntelling time\n</learner-request>" in gateway.inputs[0]
 
 
-def test_curriculum_surface_shows_processing_affordance_and_hides_teacher_link(
+def test_curriculum_surface_shows_processing_affordance_and_teacher_entry(
     tmp_path: Path,
 ) -> None:
     client = TestClient(create_app(str(tmp_path / "curriculum-ui.db")))
@@ -314,7 +314,7 @@ def test_curriculum_surface_shows_processing_affordance_and_hides_teacher_link(
     assert "What would you like to learn?" in page.text
     assert 'id="curriculum-form"' in page.text
     assert "processing-dots" in script.text
-    assert "Teacher view" not in home.text
+    assert 'href="/teacher"' in home.text
 
 
 def test_teacher_view_expands_a_mastery_claim_into_recorded_answers(
@@ -409,3 +409,62 @@ def _answer_for(prompt: str) -> str:
     assert halves is not None
     value = Fraction(int(halves.group(1)), 2) + Fraction(1, 2)
     return str(value.numerator) if value.denominator == 1 else str(value)
+
+
+def test_navigation_identity_topic_chips_and_cross_surface_links(
+    tmp_path: Path,
+) -> None:
+    from mali.curriculum import Curriculum, Skill
+    from mali.templates import AnswerType, ParameterDomain, QuestionTemplate
+
+    database = str(tmp_path / "nav.db")
+    client = TestClient(create_app(database))
+    client.post(
+        "/learners",
+        data={"learner_id": "nav-learner", "display_name": "Ngozi"},
+        follow_redirects=False,
+    )
+
+    fresh = client.get("/learners/nav-learner")
+    assert "Ngozi" in fresh.text
+    assert "My topics" in fresh.text
+    assert "Teacher view" in fresh.text
+    assert "/session/switch" in fresh.text
+
+    _adopt_demo_curriculum(database, "nav-learner")
+    single_topic = client.get("/learners/nav-learner")
+    assert "Your topics" not in single_topic.text
+
+    pairs_template = QuestionTemplate(
+        (ParameterDomain("count", tuple(range(1, 9))),),
+        "count * 2",
+        "How many shoes fit {count} pairs?",
+        AnswerType.INTEGER,
+    )
+    pairs = Skill(
+        skill_code("pairs"),
+        0,
+        "Pairs",
+        "Two matching things make one pair.",
+        pairs_template,
+    )
+    SQLiteRecordStore(database).adopt_curriculum(
+        learner_id("nav-learner"),
+        Curriculum.load((pairs,), ()),
+        title="Counting pairs",
+        summary="Count in twos with everyday objects.",
+    )
+
+    page = client.get("/learners/nav-learner")
+    assert "Your topics" in page.text
+    assert "topic-chip-active" in page.text
+    assert f"/learners/nav-learner/topics/{demo_curriculum().version}" in page.text
+
+    during_check = client.post("/learners/nav-learner/placement")
+    assert "Your topics" not in during_check.text
+
+    teacher = client.get("/teacher")
+    assert "Student view" in teacher.text
+    missing = client.get("/learners/no-such-learner")
+    assert missing.status_code == 404
+    assert "Open teacher view" in missing.text

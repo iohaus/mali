@@ -28,6 +28,22 @@
       <span class="learner-label">{{ learner }}</span>
     </div>
     <p class="lede curriculum-summary">{{ curriculum_summary }}</p>
+    {% if can_rebuild and topics|length > 1 %}
+    <div class="topic-switcher">
+      <h3 class="topic-switcher-title">Your topics</h3>
+      <div class="topic-chips">
+        {% for topic in topics %}
+        {% if topic.active %}
+        <span class="topic-chip topic-chip-active">{{ topic.title }}</span>
+        {% else %}
+        <form action="/learners/{{ learner }}/topics/{{ topic.curriculum_version }}" method="post" class="topic-form">
+          <button type="submit" class="topic-chip">{{ topic.title }}</button>
+        </form>
+        {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
     {% if can_rebuild %}
     <form id="curriculum-form" class="curriculum-form" data-stream-path="/learners/{{ learner }}/curriculum/stream">
       <label class="sr-only" for="learning-topic">Learn something new</label>

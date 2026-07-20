@@ -65,9 +65,16 @@ input:focus { outline: 3px solid #b4dfc8; outline-offset: 1px; }
 }
 
 .brand { color: var(--green); font-family: Georgia, serif; font-size: 1.55rem; font-weight: 800; text-decoration: none; }
-.site-header nav { display: flex; gap: 1.15rem; font-size: .95rem; }
+.site-header nav { display: flex; flex-wrap: wrap; align-items: center; gap: 1.15rem; font-size: .95rem; }
 .site-header nav a { color: var(--muted); text-decoration: none; }
 .site-header nav a:hover { color: var(--green); }
+.nav-name { color: var(--ink); font-weight: 700; }
+.nav-form { display: inline; margin: 0; }
+.nav-action {
+  padding: 0; border: none; background: none; color: var(--muted);
+  font-size: .95rem; cursor: pointer;
+}
+.nav-action:hover { background: none; color: var(--green); }
 
 .welcome-shell { display: grid; min-height: calc(100vh - 82px); place-items: center; align-content: center; gap: 1.5rem; padding: 2rem 1.5rem 5rem; }
 .topic-list { display: grid; gap: .45rem; margin: 1.4rem 0 0; padding: 0; list-style: none; }
@@ -81,6 +88,17 @@ input:focus { outline: 3px solid #b4dfc8; outline-offset: 1px; }
 .topic-link.topic-active { border-color: var(--green); background: var(--green-soft); }
 .topic-title { font-weight: 700; }
 .topic-progress { margin: 0; color: var(--muted); font-size: .85rem; white-space: nowrap; }
+.not-found-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1.2rem; }
+.topic-switcher { margin: 1.1rem 0 .2rem; }
+.topic-switcher-title { margin: 0 0 .5rem; color: var(--muted); font-size: .8rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.topic-chips { display: flex; flex-wrap: wrap; gap: .45rem; }
+.topic-chip {
+  display: inline-block; padding: .3rem .8rem; border: 1px solid var(--line);
+  border-radius: 999px; background: var(--panel); color: var(--ink);
+  font-size: .85rem; font-weight: 600; cursor: pointer;
+}
+.topic-chip:hover { border-color: var(--green); background: var(--green-soft); color: var(--ink); }
+.topic-chip-active { border-color: var(--green); background: var(--green-soft); cursor: default; }
 .switch-form { margin-top: 1.6rem; }
 .switch-link {
   padding: 0; border: none; background: none; color: var(--muted);
