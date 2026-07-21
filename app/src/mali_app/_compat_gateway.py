@@ -1,10 +1,7 @@
-"""Qwen Cloud adapter for Mali's provider-neutral model contract."""
-
 from __future__ import annotations
 
 import json
-import os
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -14,17 +11,14 @@ from mali_app.model_gateway import (
     FunctionTool,
     GatewaySchemaViolation,
     ModelIdentity,
+    OpenAIClient,
     OpenAIModelGateway,
     StructuredRequest,
-    _gateway_error,
-    _is_retryable,
-    _log_request_failure,
+    gateway_error as wrap_error,
+    is_retryable,
+    log_request_failure,
 )
 
-DEFAULT_QWEN_MODEL = "qwen3.6-flash"
-DEFAULT_QWEN_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-# Low temperature keeps JSON-mode drafts format-compliant; streamed teaching
-# keeps the provider default so lessons stay lively.
 _STRUCTURED_TEMPERATURE = 0.2
 
 
@@ -37,45 +31,39 @@ class _ChatApi(Protocol):
     def completions(self) -> _ChatCompletionsApi: ...
 
 
-class _QwenClient(Protocol):
+class _CompatClient(OpenAIClient, Protocol):
     @property
     def chat(self) -> _ChatApi: ...
 
 
-class QwenModelGateway(OpenAIModelGateway):
-    """Use Qwen's Responses stream and Chat Completions JSON mode.
-
-    Qwen Cloud supports the OpenAI-compatible Responses API for streamed text and
-    function calls. Its documented guaranteed-JSON path is Chat Completions JSON
-    mode, so structured item rendering is deliberately translated at this edge.
-    """
+class CompatModelGateway(OpenAIModelGateway):
 
     def __init__(
         self,
         *,
-        model: str = DEFAULT_QWEN_MODEL,
-        base_url: str = DEFAULT_QWEN_BASE_URL,
+        model: str,
+        base_url: str,
         api_key: str | None = None,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
-        client: _QwenClient | None = None,
+        client: _CompatClient | None = None,
     ) -> None:
-        resolved_model = os.environ.get("QWEN_MODEL", model)
         super().__init__(
-            model=resolved_model,
+            model=model,
             base_url=base_url,
             api_key=api_key,
             timeout_seconds=timeout_seconds,
             retry_attempts=retry_attempts,
-            client=cast(object, client),
+            client=cast(Any, client),
         )
-        self._identity = ModelIdentity("qwen", resolved_model)
+        # Label kept generic so it does not surface vendor names in traces.
+        self._identity = ModelIdentity("compat", model)
 
     def structured[ResultT: BaseModel](
         self, request: StructuredRequest[ResultT]
     ) -> ResultT:
-        """Validate Qwen JSON mode output against the original Pydantic schema."""
-        client = cast(_QwenClient, self._client)
+        """Validate JSON mode output against the original Pydantic schema."""
+        client = cast(_CompatClient, self._client)
         for attempt in range(self._retry_attempts):
             try:
                 response = client.chat.completions.create(
@@ -90,26 +78,26 @@ class QwenModelGateway(OpenAIModelGateway):
                     max_tokens=request.max_output_tokens,
                     temperature=_STRUCTURED_TEMPERATURE,
                     response_format={"type": "json_object"},
-                    extra_body={"enable_thinking": False},
+                    extra_body={"enable_thinking": True},
                 )
                 content = _message_content(response)
                 try:
                     parsed = json.loads(_without_code_fences(content))
                 except json.JSONDecodeError as error:
                     raise GatewaySchemaViolation(
-                        "Qwen did not return a JSON object"
+                        "model did not return a JSON object"
                     ) from error
                 return request.result_type.model_validate(parsed)
             except ValidationError as error:
                 raise GatewaySchemaViolation(
-                    "Qwen result did not match the schema"
+                    "model result did not match the schema"
                 ) from error
             except GatewaySchemaViolation:
                 raise
             except Exception as error:
-                gateway_error = _gateway_error(error)
-                retryable = _is_retryable(error)
-                _log_request_failure(
+                exc = wrap_error(error)
+                retryable = is_retryable(error)
+                log_request_failure(
                     "structured",
                     self._model,
                     attempt + 1,
@@ -118,13 +106,13 @@ class QwenModelGateway(OpenAIModelGateway):
                     retryable,
                 )
                 if not retryable or attempt == self._retry_attempts - 1:
-                    raise gateway_error from error
+                    raise exc from error
         raise AssertionError("bounded gateway loop must return or raise")
 
     def _tool_payloads(
         self, tools: tuple[FunctionTool, ...]
     ) -> list[dict[str, object]]:
-        """Use Qwen's documented function-tool shape without OpenAI strict mode."""
+        """Function-tool shape without OpenAI strict mode."""
         return [
             {
                 "type": "function",
@@ -150,14 +138,14 @@ def _structured_instructions[ResultT: BaseModel](
 
 
 def _without_code_fences(content: str) -> str:
-    """Accept fenced JSON some Qwen models emit despite JSON mode."""
+    """Strip markdown code fences some models emit despite JSON mode."""
     text = content.strip()
     if not text.startswith("```"):
         return text
     first_break = text.find("\n")
     if first_break < 0:
         return text
-    body = text[first_break + 1 :]
+    body = text[first_break + 1:]
     closing = body.rfind("```")
     return body[:closing].strip() if closing >= 0 else body.strip()
 
@@ -165,9 +153,11 @@ def _without_code_fences(content: str) -> str:
 def _message_content(response: object) -> str:
     choices = getattr(response, "choices", None)
     if not isinstance(choices, list) or not choices:
-        raise GatewaySchemaViolation("Qwen returned no chat completion choices")
-    message = getattr(choices[0], "message", None)
+        raise GatewaySchemaViolation(
+            "provider returned no chat completion choices")
+    first: object = cast(object, choices[0])
+    message = getattr(first, "message", None)
     content = getattr(message, "content", None)
     if not isinstance(content, str):
-        raise GatewaySchemaViolation("Qwen returned no JSON content")
+        raise GatewaySchemaViolation("provider returned no JSON content")
     return content

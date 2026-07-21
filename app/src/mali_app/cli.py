@@ -4,6 +4,7 @@ import argparse
 import logging
 from collections.abc import Sequence
 
+from dotenv import load_dotenv
 import uvicorn
 from mali.ids import learner_id
 
@@ -20,6 +21,7 @@ _LOG = logging.getLogger(__name__)
 
 def run(arguments: Sequence[str] | None = None) -> int:
     """Run one CLI command and return a process exit status."""
+    load_dotenv(override=False)
     parser = _parser()
     parsed = parser.parse_args(arguments)
     if parsed.command == "demo-seed":

@@ -111,7 +111,7 @@ class SQLiteRecordStore:
         self._policy = policy
         self._clock = SystemClock() if clock is None else clock
         self._fresh = SystemFreshSource() if fresh is None else fresh
-        _LOG.info("SQLiteRecordStore initialized database=%s policy=%s", path, policy)
+        _LOG.debug("SQLiteRecordStore initialized database=%s policy=%s", path, policy)
         self._install_configuration()
 
     def register(self, learner: LearnerId, display_name: str) -> None:

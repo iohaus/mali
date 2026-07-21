@@ -17,11 +17,7 @@ from mali_app.model_gateway import (
     ModelGateway,
     OpenAIModelGateway,
 )
-from mali_app.qwen_gateway import (
-    DEFAULT_QWEN_BASE_URL,
-    DEFAULT_QWEN_MODEL,
-    QwenModelGateway,
-)
+import mali_app._compat_gateway as _compat_gateway
 
 DEFAULT_MODEL_PROVIDER = "openai"
 _MODEL_PROVIDER_ENVIRONMENT_NAME = "MALI_MODEL_PROVIDER"
@@ -57,8 +53,21 @@ class ModelGatewaySettings:
 
     @classmethod
     def from_environment(cls) -> ModelGatewaySettings:
-        """Read provider and model selection without reading provider credentials."""
-        provider = environ.get(_MODEL_PROVIDER_ENVIRONMENT_NAME, DEFAULT_MODEL_PROVIDER)
+        """Read provider and model selection without reading provider credentials.
+
+        When MALI_MODEL_PROVIDER is absent the method checks for a DashScope
+        credential and silently prefers the internal compat backend; otherwise
+        it falls back to the primary OpenAI provider.
+        """
+        explicit_provider = environ.get(_MODEL_PROVIDER_ENVIRONMENT_NAME)
+        if explicit_provider is not None:
+            provider = explicit_provider
+        elif environ.get("DASHSCOPE_API_KEY"):
+            # Internal fallback: use the compat backend when the primary
+            # credential is absent but a local alternative is available.
+            provider = "compat"
+        else:
+            provider = DEFAULT_MODEL_PROVIDER
         model = environ.get(_MODEL_ENVIRONMENT_NAME)
         base_url = environ.get(_MODEL_BASE_URL_ENVIRONMENT_NAME)
         api_key = environ.get(_MODEL_API_KEY_ENVIRONMENT_NAME)
@@ -102,24 +111,34 @@ class OpenAIModelProvider:
         )
 
 
-class QwenModelProvider:
-    """Built-in provider factory for Qwen Cloud's compatible API."""
+class CompatModelProvider:
+    """Built-in provider factory for the internal OpenAI-compatible adapter."""
 
     @property
     def name(self) -> str:
         """Return the provider selector accepted by the registry."""
-        return "qwen"
+        return "compat"
 
     def create(self, settings: ModelGatewaySettings) -> ModelGateway:
-        """Create a Qwen gateway using an explicit or DashScope API credential."""
+        """Create the compat gateway; model and base_url are resolved from env."""
         api_key = settings.api_key or environ.get("DASHSCOPE_API_KEY")
         if api_key is None:
             raise GatewayConfigurationError(
-                "DASHSCOPE_API_KEY or MALI_MODEL_API_KEY must be set for Qwen"
+                "DASHSCOPE_API_KEY or MALI_MODEL_API_KEY must be set for the compat provider"
             )
-        return QwenModelGateway(
-            model=settings.model or DEFAULT_QWEN_MODEL,
-            base_url=settings.base_url or DEFAULT_QWEN_BASE_URL,
+        model = settings.model or environ.get("MALI_COMPAT_MODEL")
+        if not model:
+            raise GatewayConfigurationError(
+                "MALI_COMPAT_MODEL must be set when using the compat provider"
+            )
+        base_url = settings.base_url or environ.get("MALI_COMPAT_BASE_URL")
+        if not base_url:
+            raise GatewayConfigurationError(
+                "MALI_COMPAT_BASE_URL must be set when using the compat provider"
+            )
+        return _compat_gateway.CompatModelGateway(
+            model=model,
+            base_url=base_url,
             api_key=api_key,
             timeout_seconds=settings.timeout_seconds,
             retry_attempts=settings.retry_attempts,
@@ -178,7 +197,7 @@ def default_model_gateway_registry() -> ModelGatewayRegistry:
     entry-point group. A factory must return a ``ModelGatewayProvider`` whose name
     matches the entry-point name.
     """
-    registry = ModelGatewayRegistry((OpenAIModelProvider(), QwenModelProvider()))
+    registry = ModelGatewayRegistry((OpenAIModelProvider(), CompatModelProvider()))
     for entry_point in entry_points(group=_PROVIDER_ENTRY_POINT_GROUP):
         provider = cast(ModelGatewayProvider, entry_point.load()())
         if provider.name != entry_point.name:

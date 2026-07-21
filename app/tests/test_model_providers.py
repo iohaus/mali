@@ -6,6 +6,7 @@ import pytest
 from pydantic import BaseModel
 
 import mali_app.model_providers as model_providers
+import mali_app._compat_gateway as _compat_gateway
 from mali_app.model_gateway import (
     GatewayConfigurationError,
     ModelIdentity,
@@ -14,10 +15,10 @@ from mali_app.model_gateway import (
     StructuredRequest,
 )
 from mali_app.model_providers import (
+    CompatModelProvider,
     ModelGatewayRegistry,
     ModelGatewaySettings,
     OpenAIModelProvider,
-    QwenModelProvider,
 )
 
 
@@ -113,7 +114,7 @@ def test_openai_provider_passes_base_url_to_its_gateway(
     }
 
 
-def test_qwen_provider_uses_the_generic_key_and_endpoint(
+def test_compat_provider_uses_the_generic_key_and_endpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     received: dict[str, object] = {}
@@ -122,21 +123,22 @@ def test_qwen_provider_uses_the_generic_key_and_endpoint(
         received.update(kwargs)
         return ExampleGateway()
 
-    monkeypatch.setattr(model_providers, "QwenModelGateway", fake_gateway)
+    monkeypatch.setattr(_compat_gateway, "CompatModelGateway", fake_gateway)
     settings = ModelGatewaySettings(
-        model="qwen-test",
-        base_url="https://qwen.example.test/v1",
+        model="compat-test",
+        base_url="https://compat.example.test/v1",
         api_key="provider-key",
         timeout_seconds=12.5,
         retry_attempts=3,
     )
 
-    QwenModelProvider().create(settings)
+    CompatModelProvider().create(settings)
 
     assert received == {
-        "model": "qwen-test",
-        "base_url": "https://qwen.example.test/v1",
+        "model": "compat-test",
+        "base_url": "https://compat.example.test/v1",
         "api_key": "provider-key",
         "timeout_seconds": 12.5,
         "retry_attempts": 3,
     }
+

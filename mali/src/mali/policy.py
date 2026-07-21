@@ -121,12 +121,12 @@ _DEFAULT_LUCKY_RATES = (
 POLICY_V2 = TutorPolicy(
     version="v2",
     certify_threshold=Fraction(4, 5),
-    question_budget=5,
+    question_budget=3,
     pass_rule=PassRule(needed=3, asked=3),
     miss_rates=_DEFAULT_MISS_RATES,
     lucky_rates=_DEFAULT_LUCKY_RATES,
     stale_after=timedelta(hours=24),
-    flow_budget=FlowBudget(8, 3, 800, 4_000, 2, 3),
+    flow_budget=FlowBudget(4, 2, 500, 2_000, 2, 2),
     instructor_prompt_version="instructor_v1",
     item_writer_prompt_version="item_writer_v1",
 )

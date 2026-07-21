@@ -7,11 +7,11 @@ from mali.ids import learner_id
 from pydantic import BaseModel, ValidationError
 
 from mali_app.curriculum_author import (
-    _EXAMPLE_SKILL,
+    _EXAMPLE_SKILL,  # pyright: ignore[reportPrivateUsage]
     CurriculumAuthor,
     CurriculumBuildError,
-    _certified_curriculum,
-    _CurriculumDraft,
+    _certified_curriculum,  # pyright: ignore[reportPrivateUsage]
+    _CurriculumDraft,  # pyright: ignore[reportPrivateUsage]
 )
 from mali_app.model_gateway import (
     GatewaySchemaViolation,
@@ -146,11 +146,14 @@ def test_exhausted_unusable_drafts_fail_with_honest_learner_copy() -> None:
 
 
 def test_schema_violation_repair_carries_the_field_level_detail() -> None:
+    schema_failure: GatewaySchemaViolation | None = None
     try:
         _CurriculumDraft.model_validate({"title": "Telling Time"})
+        raise AssertionError("expected schema validation to fail")
     except ValidationError as error:
         schema_failure = GatewaySchemaViolation("model result did not match")
         schema_failure.__cause__ = error
+    assert schema_failure is not None
     gateway = ScriptedAuthorGateway([schema_failure, _good_draft()])
 
     authored = CurriculumAuthor(gateway).build(LEARNER, "telling time")
@@ -361,7 +364,7 @@ def test_remainder_rules_and_four_parameters_are_accepted() -> None:
 
 
 def test_choice_questions_build_and_foundations_order_first() -> None:
-    day_parts = {
+    day_parts: dict[str, object] = {
         "code": "day-parts",
         "title": "Parts of the Day",
         "explanation": (
@@ -410,7 +413,8 @@ def test_choice_rule_outside_its_options_is_named_for_repair() -> None:
         },
     }
     draft = _draft(
-        [_skill("first-steps", []), _skill("middle-steps", ["first-steps"]), broken]
+        [_skill("first-steps", []),
+         _skill("middle-steps", ["first-steps"]), broken]
     )
     gateway = ScriptedAuthorGateway([draft, _good_draft()])
 
@@ -433,7 +437,8 @@ def test_too_small_choice_ranges_are_rejected_not_grown() -> None:
         },
     }
     draft = _draft(
-        [_skill("first-steps", []), _skill("middle-steps", ["first-steps"]), narrow]
+        [_skill("first-steps", []),
+         _skill("middle-steps", ["first-steps"]), narrow]
     )
     gateway = ScriptedAuthorGateway([draft, _good_draft()])
 
