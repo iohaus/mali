@@ -413,8 +413,7 @@ def test_choice_rule_outside_its_options_is_named_for_repair() -> None:
         },
     }
     draft = _draft(
-        [_skill("first-steps", []),
-         _skill("middle-steps", ["first-steps"]), broken]
+        [_skill("first-steps", []), _skill("middle-steps", ["first-steps"]), broken]
     )
     gateway = ScriptedAuthorGateway([draft, _good_draft()])
 
@@ -437,8 +436,7 @@ def test_too_small_choice_ranges_are_rejected_not_grown() -> None:
         },
     }
     draft = _draft(
-        [_skill("first-steps", []),
-         _skill("middle-steps", ["first-steps"]), narrow]
+        [_skill("first-steps", []), _skill("middle-steps", ["first-steps"]), narrow]
     )
     gateway = ScriptedAuthorGateway([draft, _good_draft()])
 

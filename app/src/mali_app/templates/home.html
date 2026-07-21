@@ -48,9 +48,9 @@
     {% if error %}<p class="notice notice-error" role="alert">{{ error }}</p>{% endif %}
     <form action="/learners" method="post" class="stacked-form">
       <label for="display_name">Your name</label>
-      <input id="display_name" name="display_name" autocomplete="name" required maxlength="80" placeholder="Ada">
+      <input id="display_name" name="display_name" autocomplete="name" required maxlength="80" placeholder="Enter your name">
       <label for="learner_id">A short learner ID</label>
-      <input id="learner_id" name="learner_id" required maxlength="64" pattern="[a-z0-9-]+" placeholder="ada-1">
+      <input id="learner_id" name="learner_id" required maxlength="64" pattern="[a-z0-9-]+" placeholder="Enter you learner ID (lowercase letters, numbers, and hyphens only)">
       <button type="submit">Start with Mali</button>
     </form>
   </section>

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 from mali.ids import learner_id
+from mali.policy import POLICY_V2
 from pydantic import BaseModel
 
 from mali_app.api import create_app
@@ -47,7 +48,7 @@ def test_api_drives_placement_target_and_check_to_audited_completion(
 
     _adopt_demo_curriculum(database, "api-learner")
     assert client.post("/v1/learners/api-learner/placement").status_code == 200
-    for _ in range(5):
+    for _ in range(POLICY_V2.question_budget):
         _answer_current_question(client, correctly=False)
     placed = client.get("/v1/learners/api-learner/progress")
     assert placed.json()["placed"]
@@ -57,7 +58,7 @@ def test_api_drives_placement_target_and_check_to_audited_completion(
     assert targeted.status_code == 200
     assert targeted.json()["current_skill"] == "equal-halves"
     assert client.post("/v1/learners/api-learner/check").status_code == 200
-    for _ in range(3):
+    for _ in range(POLICY_V2.pass_rule.asked):
         _answer_current_question(client)
     completed = client.get("/v1/learners/api-learner/progress")
 

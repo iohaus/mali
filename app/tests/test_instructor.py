@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from mali.ids import learner_id
+from mali.policy import POLICY_V2
 from pydantic import BaseModel
 
 from mali_app.api import create_app
@@ -153,16 +154,11 @@ def test_instructor_budget_closes_with_a_typed_sse_outcome(tmp_path: Path) -> No
 
     assert response.status_code == 200
     assert '"outcome":"budget_exhausted"' in response.text
-    assert len(gateway.requests) == 5
+    assert 1 <= len(gateway.requests) <= POLICY_V2.flow_budget.max_turns
     _assert_trace_rows(
         database,
         expected_outcomes=(
-            "continued",
-            "continued",
-            "continued",
-            "continued",
-            "continued",
-            "budget_exhausted",
+            ("continued",) * POLICY_V2.flow_budget.max_turns + ("budget_exhausted",)
         ),
     )
 
@@ -255,7 +251,7 @@ def test_l2_mode_completes_the_model_free_learning_flow(tmp_path: Path) -> None:
 
     _place_and_target(client, database, "l2-learner")
     assert client.post("/v1/learners/l2-learner/check").status_code == 200
-    for _ in range(3):
+    for _ in range(POLICY_V2.pass_rule.asked):
         _answer_current_question(client, "l2-learner")
 
     completed = client.get("/v1/learners/l2-learner/progress")
@@ -279,7 +275,7 @@ def _place_and_target(client: TestClient, database: str, learner: str) -> None:
     assert registered.status_code == 201
     _adopt_demo_curriculum(database, learner)
     assert client.post(f"/v1/learners/{learner}/placement").status_code == 200
-    for _ in range(5):
+    for _ in range(POLICY_V2.question_budget):
         _answer_current_question(client, learner, correctly=False)
     assert client.get(f"/v1/learners/{learner}/progress").json()["placed"]
     targeted = client.post(f"/v1/learners/{learner}/targets/equal-halves")

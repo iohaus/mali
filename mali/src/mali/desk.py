@@ -15,6 +15,7 @@ from mali.actions import (
     PassCheck,
     ProposeTarget,
     RecordAnswer,
+    SkipPlacement,
     StartCheck,
     StartPlacement,
 )
@@ -59,6 +60,13 @@ class TutorDesk:
         if isinstance(action, ClearTarget):
             progress = replace(
                 snapshot.progress, target=None, version=snapshot.progress.version + 1
+            )
+            return ActionPlan((ProgressWrite(progress),), entry)
+        if isinstance(action, SkipPlacement):
+            progress = replace(
+                snapshot.progress,
+                placed=True,
+                version=snapshot.progress.version + 1,
             )
             return ActionPlan((ProgressWrite(progress),), entry)
         if isinstance(action, (StartPlacement, StartCheck)):

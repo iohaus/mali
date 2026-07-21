@@ -71,8 +71,7 @@ class StreamRequest:
     tools: tuple[FunctionTool, ...] = ()
 
     def __post_init__(self) -> None:
-        _validate_request(self.instructions, self.input,
-                          self.max_output_tokens)
+        _validate_request(self.instructions, self.input, self.max_output_tokens)
         names = tuple(tool.name for tool in self.tools)
         if len(set(names)) != len(names):
             raise ValueError("model tool names must be unique")
@@ -105,8 +104,7 @@ class StructuredRequest[ResultT: BaseModel]:
     result_type: type[ResultT]
 
     def __post_init__(self) -> None:
-        _validate_request(self.instructions, self.input,
-                          self.max_output_tokens)
+        _validate_request(self.instructions, self.input, self.max_output_tokens)
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,8 +167,7 @@ class OpenAIModelGateway:
         if timeout_seconds <= 0:
             raise GatewayConfigurationError("gateway timeout must be positive")
         if retry_attempts < 1:
-            raise GatewayConfigurationError(
-                "gateway attempts must be positive")
+            raise GatewayConfigurationError("gateway attempts must be positive")
         self._model = model
         self._identity = ModelIdentity("openai", model)
         self._retry_attempts = retry_attempts
@@ -237,8 +234,7 @@ class OpenAIModelGateway:
                 )
                 parsed = _attribute(response, "output_parsed")
                 if parsed is None:
-                    raise GatewaySchemaViolation(
-                        "model returned no structured result")
+                    raise GatewaySchemaViolation("model returned no structured result")
                 if isinstance(parsed, request.result_type):
                     return parsed
                 return request.result_type.model_validate(parsed)
@@ -285,8 +281,7 @@ class FixtureModelGateway:
         """Yield recorded text and function-call events for a matching request."""
         fixture = self._fixture_for(_stream_fingerprint(request))
         if fixture.stream is None:
-            raise FixtureMissing(
-                "fixture has a structured result, not a stream")
+            raise FixtureMissing("fixture has a structured result, not a stream")
         return iter(fixture.stream)
 
     def structured[ResultT: BaseModel](
@@ -295,8 +290,7 @@ class FixtureModelGateway:
         """Recreate the recorded structured result using the requested schema."""
         fixture = self._fixture_for(_structured_fingerprint(request))
         if fixture.structured is None:
-            raise FixtureMissing(
-                "fixture has a stream result, not structured data")
+            raise FixtureMissing("fixture has a stream result, not structured data")
         try:
             return request.result_type.model_validate(fixture.structured)
         except ValidationError as error:
@@ -308,8 +302,7 @@ class FixtureModelGateway:
         try:
             return self._fixtures[fingerprint]
         except KeyError as error:
-            raise FixtureMissing(
-                f"no fixture matches request {fingerprint}") from error
+            raise FixtureMissing(f"no fixture matches request {fingerprint}") from error
 
 
 class RecordingModelGateway:
@@ -345,8 +338,7 @@ class RecordingModelGateway:
         self._fixtures.append(
             RecordedFixture(
                 _structured_fingerprint(request),
-                structured=cast(dict[str, object],
-                                result.model_dump(mode="json")),
+                structured=cast(dict[str, object], result.model_dump(mode="json")),
             )
         )
         return result
@@ -430,15 +422,13 @@ def _as_iterator(value: object) -> Iterator[object]:
     try:
         return iter(cast(Iterator[object], value))
     except TypeError as error:
-        raise GatewayUnavailable(
-            "model service did not return a stream") from error
+        raise GatewayUnavailable("model service did not return a stream") from error
 
 
 def _stream_delta(event: object) -> StreamDelta | None:
     event_type = _attribute(event, "type")
     if event_type in {"error", "response.failed", "response.incomplete"}:
-        raise GatewayUnavailable(
-            "model stream ended before a completed response")
+        raise GatewayUnavailable("model stream ended before a completed response")
     if event_type == "response.output_item.done":
         item = _attribute(event, "item")
         if _attribute(item, "type") != "function_call":
@@ -457,8 +447,7 @@ def _stream_delta(event: object) -> StreamDelta | None:
         return None
     delta = _attribute(event, "delta")
     if not isinstance(delta, str):
-        raise GatewayUnavailable(
-            "model stream contained an unreadable text fragment")
+        raise GatewayUnavailable("model stream contained an unreadable text fragment")
     return StreamDelta(delta)
 
 

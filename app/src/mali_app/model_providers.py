@@ -9,6 +9,7 @@ from os import environ
 from typing import Protocol, cast
 from urllib.parse import urlparse
 
+import mali_app._compat_gateway as _compat_gateway
 from mali_app.model_gateway import (
     DEFAULT_MODEL,
     DEFAULT_RETRY_ATTEMPTS,
@@ -17,7 +18,6 @@ from mali_app.model_gateway import (
     ModelGateway,
     OpenAIModelGateway,
 )
-import mali_app._compat_gateway as _compat_gateway
 
 DEFAULT_MODEL_PROVIDER = "openai"
 _MODEL_PROVIDER_ENVIRONMENT_NAME = "MALI_MODEL_PROVIDER"
@@ -124,7 +124,8 @@ class CompatModelProvider:
         api_key = settings.api_key or environ.get("DASHSCOPE_API_KEY")
         if api_key is None:
             raise GatewayConfigurationError(
-                "DASHSCOPE_API_KEY or MALI_MODEL_API_KEY must be set for the compat provider"
+                "DASHSCOPE_API_KEY or MALI_MODEL_API_KEY must be set for the "
+                "compat provider"
             )
         model = settings.model or environ.get("MALI_COMPAT_MODEL")
         if not model:

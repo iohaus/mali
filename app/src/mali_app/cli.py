@@ -4,8 +4,8 @@ import argparse
 import logging
 from collections.abc import Sequence
 
-from dotenv import load_dotenv
 import uvicorn
+from dotenv import load_dotenv
 from mali.ids import learner_id
 
 from mali_app.api import create_app

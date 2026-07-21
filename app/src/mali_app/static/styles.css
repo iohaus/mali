@@ -89,6 +89,10 @@ input:focus { outline: 3px solid #b4dfc8; outline-offset: 1px; }
 .topic-title { font-weight: 700; }
 .topic-progress { margin: 0; color: var(--muted); font-size: .85rem; white-space: nowrap; }
 .not-found-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1.2rem; }
+.begin-choices { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+.begin-choices form { margin: 0; }
+.begin-skip { border: 1px solid var(--line); background: var(--panel); color: var(--muted); }
+.begin-skip:hover { border-color: var(--green); background: var(--green-soft); color: var(--ink); }
 .topic-switcher { margin: 1.1rem 0 .2rem; }
 .topic-switcher-title { margin: 0 0 .5rem; color: var(--muted); font-size: .8rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .topic-chips { display: flex; flex-wrap: wrap; gap: .45rem; }

@@ -11,6 +11,7 @@ from mali.rules import (
     next_engine_action,
     override_mastery,
     propose_target,
+    skip_placement,
     teach_episode,
 )
 from mali.templates import AnswerType, ParameterDomain, QuestionTemplate
@@ -36,6 +37,27 @@ def test_ready_target_is_allowed_for_student() -> None:
         ),
         Allowed,
     )
+
+
+def test_skip_placement_is_the_students_choice_before_placement() -> None:
+    assert isinstance(
+        skip_placement(_progress(placed=False), None, Actor.STUDENT), Allowed
+    )
+
+    already_placed = skip_placement(_progress(placed=True), None, Actor.STUDENT)
+    assert isinstance(already_placed, Refused)
+    assert already_placed.reason is RefusalReason.PLACEMENT_ALREADY_DONE
+
+    wrong_actor = skip_placement(_progress(placed=False), None, Actor.ENGINE)
+    assert isinstance(wrong_actor, Refused)
+    assert wrong_actor.reason is RefusalReason.INVALID_ACTOR
+
+    open_check = CheckPoint(
+        checkpoint_id("c-skip-rules"), CheckPointKind.PLACEMENT, None, ()
+    )
+    mid_check = skip_placement(_progress(placed=False), open_check, Actor.STUDENT)
+    assert isinstance(mid_check, Refused)
+    assert mid_check.reason is RefusalReason.CHECK_IN_PROGRESS
 
 
 def test_teacher_override_requires_teacher_actor() -> None:

@@ -789,7 +789,7 @@ class SQLiteRecordStore:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 """
-                INSERT OR IGNORE INTO policy (version, params, created_at)
+                INSERT OR REPLACE INTO policy (version, params, created_at)
                 VALUES (?, ?, ?)
                 """,
                 (self._policy.version, _policy_payload(self._policy), self._now()),

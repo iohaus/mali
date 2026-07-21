@@ -12,6 +12,7 @@ from mali.actions import (
     AskQuestion,
     ProposeTarget,
     RecordAnswer,
+    SkipPlacement,
     StartCheck,
     StartPlacement,
     TeachEpisode,
@@ -50,7 +51,7 @@ _REFUSAL_COPY = {
     RefusalReason.CHECK_IN_PROGRESS: "Finish the current check before changing course.",
     RefusalReason.PLACEMENT_ALREADY_DONE: "Your starting check is already complete.",
     RefusalReason.PLACEMENT_REQUIRED: (
-        "Start with a short check so we can pick a good next step."
+        "Choose how to begin: take the short check, or start from the beginning."
     ),
     RefusalReason.NOTHING_TO_CHECK: "There is no active check right now.",
     RefusalReason.NOT_CURRENT_TARGET: "That is not the skill currently being checked.",
@@ -202,6 +203,15 @@ def create_app(
         _LOG.debug("placement started learner=%s progress=%s", learner, progress)
         return progress
 
+    def skip_placement(learner: str) -> dict[str, object]:
+        _LOG.info("skip placement learner=%s", learner)
+        identifier = _learner_or_error(learner)
+        _snapshot_or_error(store, learner)
+        result = _execute_or_error(store, identifier, SkipPlacement(), Actor.STUDENT)
+        progress = _progress_response(_committed_snapshot(result))
+        _LOG.debug("placement skipped learner=%s progress=%s", learner, progress)
+        return progress
+
     def propose_target(learner: str, skill: str) -> dict[str, object]:
         identifier = _learner_or_error(learner)
         _snapshot_or_error(store, learner)
@@ -309,6 +319,9 @@ def create_app(
     )
     app.add_api_route(
         "/v1/learners/{learner}/placement", start_placement, methods=["POST"]
+    )
+    app.add_api_route(
+        "/v1/learners/{learner}/placement/skip", skip_placement, methods=["POST"]
     )
     app.add_api_route(
         "/v1/learners/{learner}/targets/{skill}", propose_target, methods=["POST"]

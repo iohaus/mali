@@ -18,8 +18,7 @@ class WrittenItem(BaseModel):
 
 
 def test_compat_gateway_uses_json_mode_for_structured_output() -> None:
-    chat = FakeChatCompletions(
-        '{"question_text":"What is one half plus one half?"}')
+    chat = FakeChatCompletions('{"question_text":"What is one half plus one half?"}')
     gateway = CompatModelGateway(
         model=_TEST_MODEL,
         base_url=_TEST_BASE_URL,
@@ -30,19 +29,17 @@ def test_compat_gateway_uses_json_mode_for_structured_output() -> None:
         StructuredRequest("Write one item.", "Use halves.", 50, WrittenItem)
     )
 
-    assert result == WrittenItem(
-        question_text="What is one half plus one half?")
+    assert result == WrittenItem(question_text="What is one half plus one half?")
     call = cast(dict[str, Any], chat.calls[0])
     assert call["response_format"] == {"type": "json_object"}
-    assert call["extra_body"] == {"enable_thinking": True}
+    assert call["extra_body"] == {"enable_thinking": False}
     assert call["temperature"] == 0.2
     messages = cast(list[dict[str, Any]], call["messages"])
     assert "JSON object" in cast(str, messages[0]["content"])
 
 
 def test_compat_gateway_accepts_fenced_json_despite_json_mode() -> None:
-    chat = FakeChatCompletions(
-        '```json\n{"question_text":"How many halves?"}\n```')
+    chat = FakeChatCompletions('```json\n{"question_text":"How many halves?"}\n```')
     gateway = CompatModelGateway(
         model=_TEST_MODEL,
         base_url=_TEST_BASE_URL,
@@ -61,8 +58,7 @@ def test_compat_gateway_uses_responses_streaming_without_strict_tools() -> None:
     gateway = CompatModelGateway(
         model=_TEST_MODEL,
         base_url=_TEST_BASE_URL,
-        client=FakeCompatClient(
-            responses, FakeChat(FakeChatCompletions("{}"))),
+        client=FakeCompatClient(responses, FakeChat(FakeChatCompletions("{}"))),
     )
     tool = FunctionTool(
         "get_progress_summary",
@@ -110,8 +106,7 @@ class FakeChatCompletions:
     def create(self, **kwargs: object) -> object:
         self.calls.append(kwargs)
         return SimpleNamespace(
-            choices=[SimpleNamespace(
-                message=SimpleNamespace(content=self._content))]
+            choices=[SimpleNamespace(message=SimpleNamespace(content=self._content))]
         )
 
 

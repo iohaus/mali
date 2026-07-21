@@ -1,4 +1,4 @@
-from mali.actions import Actor, AskQuestion, ProposeTarget, RecordAnswer
+from mali.actions import Actor, AskQuestion, ProposeTarget, RecordAnswer, SkipPlacement
 from mali.checkpoint import CheckPoint, CheckPointKind
 from mali.curriculum import Curriculum, Skill
 from mali.desk import TutorDesk
@@ -35,6 +35,26 @@ def test_refused_actions_do_not_produce_a_plan() -> None:
 
     assert isinstance(plan, Refused)
     assert plan.reason is RefusalReason.NOT_READY_YET
+
+
+def test_skipping_placement_resolves_a_start_without_crediting_skills() -> None:
+    unplaced = _snapshot(placed=False)
+    assert TutorDesk.available(unplaced).targets == ()
+
+    plan = TutorDesk.plan(SkipPlacement(), unplaced, Actor.STUDENT)
+
+    assert not isinstance(plan, Refused)
+    write = plan.writes[0]
+    assert isinstance(write, ProgressWrite)
+    assert write.progress.placed
+    assert write.progress.mask == 0
+    assert write.progress.version == 1
+
+    resolved = Snapshot(write.progress, None, POLICY_V2, None)
+    assert TutorDesk.available(resolved).targets == (
+        (skill_code("parts"), (skill_code("parts"),)),
+    )
+    assert not TutorDesk.available(resolved).can_start_placement
 
 
 def test_available_lists_ready_targets_with_their_path() -> None:

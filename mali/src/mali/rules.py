@@ -19,6 +19,7 @@ from mali.actions import (
     RecordAnswer,
     RegisterLearner,
     RemoveLearner,
+    SkipPlacement,
     StartCheck,
     StartPlacement,
     TeachEpisode,
@@ -95,6 +96,8 @@ def evaluate(
     match action:
         case StartPlacement():
             return start_placement(progress, checkpoint, actor)
+        case SkipPlacement():
+            return skip_placement(progress, checkpoint, actor)
         case ProposeTarget():
             return propose_target(progress, checkpoint, action, actor)
         case TeachEpisode():
@@ -213,6 +216,23 @@ def start_placement(
 ) -> RuleVerdict:
     """Check whether a learner can start their one placement session."""
     if actor is not Actor.ENGINE:
+        return Refused(RefusalReason.INVALID_ACTOR)
+    if checkpoint is not None:
+        return Refused(RefusalReason.CHECK_IN_PROGRESS)
+    if progress.placed:
+        return Refused(RefusalReason.PLACEMENT_ALREADY_DONE)
+    return Allowed()
+
+
+def skip_placement(
+    progress: Progress, checkpoint: CheckPoint | None, actor: Actor
+) -> RuleVerdict:
+    """Check whether a learner can decline placement and start at zero.
+
+    Skipping resolves the starting point without crediting any skill; only
+    checked answers ever move certified progress.
+    """
+    if actor is not Actor.STUDENT:
         return Refused(RefusalReason.INVALID_ACTOR)
     if checkpoint is not None:
         return Refused(RefusalReason.CHECK_IN_PROGRESS)

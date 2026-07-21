@@ -129,10 +129,15 @@
         <button type="submit">Check my answer</button>
       </form>
     {% elif not placed %}
-      <p>We’ll use a few questions to find a comfortable place to begin.</p>
-      <form hx-post="/learners/{{ learner }}/placement" hx-target="#student-content" hx-swap="outerHTML">
-        <button type="submit">Let’s see where I am</button>
-      </form>
+      <p>We’ll use a few questions to find a comfortable place to begin — or jump straight in from the first skill.</p>
+      <div class="begin-choices">
+        <form hx-post="/learners/{{ learner }}/placement" hx-target="#student-content" hx-swap="outerHTML">
+          <button type="submit">Let’s see where I am</button>
+        </form>
+        <form hx-post="/learners/{{ learner }}/placement/skip" hx-target="#student-content" hx-swap="outerHTML">
+          <button type="submit" class="begin-skip">Skip — start from the beginning</button>
+        </form>
+      </div>
     {% elif target_title %}
       <p>When this feels comfortable, take a short check to show what you have learned.</p>
       <form hx-post="/learners/{{ learner }}/check" hx-target="#student-content" hx-swap="outerHTML">

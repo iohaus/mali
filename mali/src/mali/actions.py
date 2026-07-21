@@ -24,6 +24,11 @@ class StartPlacement:
 
 
 @dataclass(frozen=True, slots=True)
+class SkipPlacement:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
 class AskQuestion:
     skill: SkillCode
     seed: int
@@ -103,6 +108,7 @@ class AdoptPolicy:
 
 type Action = (
     StartPlacement
+    | SkipPlacement
     | AskQuestion
     | RecordAnswer
     | CertifyPlacement

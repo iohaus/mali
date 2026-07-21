@@ -21,6 +21,7 @@ from mali.actions import (
     AskQuestion,
     ProposeTarget,
     RecordAnswer,
+    SkipPlacement,
     StartCheck,
     StartPlacement,
 )
@@ -201,6 +202,45 @@ def install_web_routes(
                     question_prompt,
                     snapshot=result.snapshot,
                     feedback="Here is your first question. Take your time.",
+                )
+            return _student_update(
+                templates,
+                request,
+                store,
+                identifier,
+                question_prompt,
+                snapshot=snapshot,
+                feedback=_refusal_copy(result),
+            )
+        except (LearnerNotFound, StoreError):
+            return _not_found(templates, request)
+
+    def skip_placement(request: Request, learner: str) -> HTMLResponse:
+        identifier = _learner_or_none(learner)
+        if identifier is None:
+            return _not_found(templates, request)
+        try:
+            snapshot = store.snapshot(identifier)
+            result = store.execute(
+                identifier,
+                SkipPlacement(),
+                Actor.STUDENT,
+                expected_version=snapshot.progress.version,
+            )
+            if (
+                result.status is ExecutionStatus.COMMITTED
+                and result.snapshot is not None
+            ):
+                return _student_update(
+                    templates,
+                    request,
+                    store,
+                    identifier,
+                    question_prompt,
+                    snapshot=result.snapshot,
+                    feedback=(
+                        "Starting from the beginning. Pick a skill when you are ready."
+                    ),
                 )
             return _student_update(
                 templates,
@@ -449,6 +489,9 @@ def install_web_routes(
         "/learners/{learner}/placement", begin_placement, methods=["POST"]
     )
     app.add_api_route(
+        "/learners/{learner}/placement/skip", skip_placement, methods=["POST"]
+    )
+    app.add_api_route(
         "/learners/{learner}/targets/{skill}", choose_skill, methods=["POST"]
     )
     app.add_api_route("/learners/{learner}/check", begin_check, methods=["POST"])
@@ -661,7 +704,9 @@ def _refusal_copy(result: ExecutionResult) -> str:
     if result.refusal is RefusalReason.CHECK_IN_PROGRESS:
         return "Finish the quick check already in progress first."
     if result.refusal is RefusalReason.PLACEMENT_REQUIRED:
-        return "Start with a short check so we can find a good next step."
+        return "Choose how to begin: take the short check, or start from the beginning."
+    if result.refusal is RefusalReason.PLACEMENT_ALREADY_DONE:
+        return "Your starting point is already set."
     if result.refusal is RefusalReason.ALREADY_MASTERED:
         return "You have already completed that skill."
     return "That step is not available right now."

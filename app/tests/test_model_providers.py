@@ -5,8 +5,8 @@ from collections.abc import Iterator
 import pytest
 from pydantic import BaseModel
 
-import mali_app.model_providers as model_providers
 import mali_app._compat_gateway as _compat_gateway
+import mali_app.model_providers as model_providers
 from mali_app.model_gateway import (
     GatewayConfigurationError,
     ModelIdentity,
@@ -141,4 +141,3 @@ def test_compat_provider_uses_the_generic_key_and_endpoint(
         "timeout_seconds": 12.5,
         "retry_attempts": 3,
     }
-

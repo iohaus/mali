@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from mali.actions import Actor, OverrideMastery
 from mali.ids import learner_id, skill_code
+from mali.policy import POLICY_V2
 from pydantic import BaseModel
 
 from mali_app.api import create_app
@@ -193,7 +194,7 @@ def test_student_page_runs_placement_lesson_and_inline_check(tmp_path: Path) -> 
     )
 
     page = client.post("/learners/web-learner/placement")
-    for _ in range(5):
+    for _ in range(POLICY_V2.question_budget):
         page = _submit_current_answer(client, "web-learner", page.text, correctly=False)
 
     assert "Choose your next step" in page.text
@@ -204,7 +205,7 @@ def test_student_page_runs_placement_lesson_and_inline_check(tmp_path: Path) -> 
     assert "data-lesson-url" in lesson.text
 
     started = client.post("/learners/web-learner/check")
-    for _ in range(3):
+    for _ in range(POLICY_V2.pass_rule.asked):
         started = _submit_current_answer(client, "web-learner", started.text)
 
     assert "Adding halves" in started.text
@@ -324,7 +325,7 @@ def test_teacher_view_expands_a_mastery_claim_into_recorded_answers(
     client = TestClient(create_app(database))
     _place_and_choose_equal_halves(client, database, "teacher-learner")
     page = client.post("/learners/teacher-learner/check")
-    for _ in range(3):
+    for _ in range(POLICY_V2.pass_rule.asked):
         page = _submit_current_answer(client, "teacher-learner", page.text)
 
     dashboard = client.get("/teacher")
@@ -347,7 +348,7 @@ def test_teacher_view_includes_teacher_attribution_and_note_for_overrides(
     client = TestClient(create_app(database))
     _place_and_choose_equal_halves(client, database, "override-learner")
     page = client.post("/learners/override-learner/check")
-    for _ in range(3):
+    for _ in range(POLICY_V2.pass_rule.asked):
         page = _submit_current_answer(client, "override-learner", page.text)
     store = SQLiteRecordStore(database)
     result = store.execute(
@@ -375,7 +376,7 @@ def _place_and_choose_equal_halves(
     assert created.status_code == 303
     _adopt_demo_curriculum(database, learner)
     page = client.post(f"/learners/{learner}/placement")
-    for _ in range(5):
+    for _ in range(POLICY_V2.question_budget):
         page = _submit_current_answer(client, learner, page.text, correctly=False)
     selected = client.post(f"/learners/{learner}/targets/equal-halves")
     assert "Great choice" in selected.text
@@ -468,3 +469,41 @@ def test_navigation_identity_topic_chips_and_cross_surface_links(
     missing = client.get("/learners/no-such-learner")
     assert missing.status_code == 404
     assert "Open teacher view" in missing.text
+
+
+def test_skipping_placement_starts_study_from_the_first_skill(
+    tmp_path: Path,
+) -> None:
+    database = str(tmp_path / "skip.db")
+    client = TestClient(create_app(database))
+    client.post(
+        "/learners",
+        data={"learner_id": "skip-learner", "display_name": "Sade"},
+        follow_redirects=False,
+    )
+    _adopt_demo_curriculum(database, "skip-learner")
+
+    before = client.get("/learners/skip-learner")
+    assert "Let’s see where I am" in before.text
+    assert "Skip — start from the beginning" in before.text
+
+    page = client.post("/learners/skip-learner/placement/skip")
+    assert "Starting from the beginning" in page.text
+    assert "Choose your next step" in page.text
+    assert "Equal halves" in page.text
+
+    lesson = client.post("/learners/skip-learner/targets/equal-halves")
+    assert "Great choice" in lesson.text
+    started = client.post("/learners/skip-learner/check")
+    for _ in range(POLICY_V2.pass_rule.asked):
+        started = _submit_current_answer(client, "skip-learner", started.text)
+    assert "Equal halves" in started.text
+
+    repeat = client.post("/learners/skip-learner/placement/skip")
+    assert "Your starting point is already set." in repeat.text
+
+    store = SQLiteRecordStore(database)
+    snapshot = store.snapshot(learner_id("skip-learner"))
+    assert snapshot.progress.placed
+    assert snapshot.progress.mask == 1
+    assert store.audit(learner_id("skip-learner")).valid

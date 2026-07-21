@@ -14,9 +14,11 @@ from mali_app.model_gateway import (
     OpenAIClient,
     OpenAIModelGateway,
     StructuredRequest,
-    gateway_error as wrap_error,
     is_retryable,
     log_request_failure,
+)
+from mali_app.model_gateway import (
+    gateway_error as wrap_error,
 )
 
 _STRUCTURED_TEMPERATURE = 0.2
@@ -37,7 +39,6 @@ class _CompatClient(OpenAIClient, Protocol):
 
 
 class CompatModelGateway(OpenAIModelGateway):
-
     def __init__(
         self,
         *,
@@ -78,7 +79,7 @@ class CompatModelGateway(OpenAIModelGateway):
                     max_tokens=request.max_output_tokens,
                     temperature=_STRUCTURED_TEMPERATURE,
                     response_format={"type": "json_object"},
-                    extra_body={"enable_thinking": True},
+                    extra_body={"enable_thinking": False},
                 )
                 content = _message_content(response)
                 try:
@@ -145,7 +146,7 @@ def _without_code_fences(content: str) -> str:
     first_break = text.find("\n")
     if first_break < 0:
         return text
-    body = text[first_break + 1:]
+    body = text[first_break + 1 :]
     closing = body.rfind("```")
     return body[:closing].strip() if closing >= 0 else body.strip()
 
@@ -153,8 +154,7 @@ def _without_code_fences(content: str) -> str:
 def _message_content(response: object) -> str:
     choices = getattr(response, "choices", None)
     if not isinstance(choices, list) or not choices:
-        raise GatewaySchemaViolation(
-            "provider returned no chat completion choices")
+        raise GatewaySchemaViolation("provider returned no chat completion choices")
     first: object = cast(object, choices[0])
     message = getattr(first, "message", None)
     content = getattr(message, "content", None)
