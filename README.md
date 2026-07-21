@@ -8,7 +8,7 @@ mastery only through auto-graded practice checks. A teacher or parent can expand
 claim into the exact questions asked and answers given, and a single command re-derives the whole
 record from its evidence journal.
 
-> 🎥 **Demo video:** _link added at submission time_
+> **Demo video:** https://www.youtube.com/watch?v=ngMXlw5YUzE
 
 ## What Mali does
 
@@ -30,14 +30,18 @@ record from its evidence journal.
 
 Requirements: Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
+In your .env file in app/.env
+```bash
+OPENAI_API_KEY=<your_api_key>
+```
+
 ```bash
 cd app
 uv sync
-export OPENAI_API_KEY=sk-...
 uv run mali serve
 ```
 
-Open http://127.0.0.1:8000, enter a name, and tell Mali what you'd like to learn.
+Open http://127.0.0.1:8000, enter a name and id, and tell Mali what you'd like to learn.
 
 All commands run from the `app/` directory; `uv sync` there also installs the local tutoring
 core package automatically.
@@ -53,26 +57,6 @@ uv run mali serve
 - Visit http://127.0.0.1:8000/teacher → open **Mali demo learner** → expand the mastery claim to
   see the questions, answers, and timestamps behind it.
 - Verify the record from the command line:
-
-  ```bash
-  uv run mali audit --learner demo-learner
-  # journal agrees with current progress   (exit code 0)
-  ```
-
-- Then go to the home page and start a fresh journey with any topic of your own.
-
-## Model configuration
-
-| Variable | Purpose | Default |
-|---|---|---|
-| `OPENAI_API_KEY` | credential for the default OpenAI provider | — |
-| `MALI_MODEL_PROVIDER` | `openai` | `openai` |
-| `MALI_MODEL` | model override | `gpt-5.6` |
-| `MALI_MODEL_BASE_URL` | endpoint override (absolute http/https URL) | provider default |
-| `MALI_MODEL_API_KEY` | provider-neutral credential override | — |
-
-Variables must be **exported in the shell** — the app reads the process environment and does not
-load `.env` files.
 
 Without a configured model, the server still runs: lessons fall back to static teaching cards and
 questions render in plain form. Curriculum drafting needs a model connection, so the seeded demo
@@ -101,13 +85,6 @@ learner is the way to explore keyless.
 3. **Question rendering** — practice questions are rephrased engagingly, checked by a validator,
    and fall back to deterministic plain text if the rendering is rejected.
 
-**Codex at build time** drove a spec-first workflow: the tutoring core is a dependency-free
-Python package whose invariant and property-based test suite served as machine-checkable ground
-truth — Codex iterated against the suite until every law passed, and CI keeps those laws
-enforced on every push. Key decisions shaped this way: the evidence journal as the system of
-record (kill the process mid-lesson and nothing about the learner is lost), computed-only answer
-keys, refusals as typed values rather than exceptions, and a one-repair-then-fail contract for
-model drafts.
 
 ## Running the tests
 
@@ -123,10 +100,9 @@ The core suite is property-based (Hypothesis) and the whole repository type-chec
 - **No API key** — the server runs in a reduced mode (static lessons, plain questions); use
   `demo-seed` to explore, or export a key to enable curriculum drafting and live lessons.
 - **Port already in use** — `uv run mali serve --port 8010`.
-- **Start fresh** — stop the server, delete `app/mali.db`, re-run `uv run mali demo-seed`.
 - **Running from the repository root** — `uv run --project app mali serve` works but writes
   `mali.db` into your current directory; prefer `cd app`.
 
-## License
+
 
 MIT — see [LICENSE](LICENSE).
