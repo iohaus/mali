@@ -29,6 +29,15 @@ def item_writer_prompt(policy: TutorPolicy) -> PromptAsset:
     return _load_prompt(policy.item_writer_prompt_version, "item_writer")
 
 
+def _rendered_conversation(context: InstructorContextPack) -> str:
+    if not context.recent_conversation:
+        return "none"
+    return "\n".join(
+        f"student: {exchange.student_text}\ntutor: {exchange.tutor_text}"
+        for exchange in context.recent_conversation
+    )
+
+
 def render_instructor_context(context: InstructorContextPack) -> str:
     """Delimit record and student data as input, never system instructions."""
     mistakes = "\n".join(
@@ -49,6 +58,9 @@ def render_instructor_context(context: InstructorContextPack) -> str:
         "<recorded-mistakes>\n"
         f"{mistakes or 'none'}\n"
         "</recorded-mistakes>\n"
+        "<recent-conversation>\n"
+        f"{_rendered_conversation(context)}\n"
+        "</recent-conversation>\n"
         "<untrusted-student-turn>\n"
         f"{context.student_turn}\n"
         "</untrusted-student-turn>"

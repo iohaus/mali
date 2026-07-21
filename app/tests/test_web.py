@@ -507,3 +507,24 @@ def test_skipping_placement_starts_study_from_the_first_skill(
     assert snapshot.progress.placed
     assert snapshot.progress.mask == 1
     assert store.audit(learner_id("skip-learner")).valid
+
+
+def test_autoplay_lesson_shows_a_single_opener(tmp_path: Path) -> None:
+    database = str(tmp_path / "opener.db")
+    client = TestClient(create_app(database))
+    client.post(
+        "/learners",
+        data={"learner_id": "opener-learner", "display_name": "Ada"},
+        follow_redirects=False,
+    )
+    _adopt_demo_curriculum(database, "opener-learner")
+    client.post("/learners/opener-learner/placement/skip")
+
+    lesson = client.post("/learners/opener-learner/targets/equal-halves")
+
+    assert "Great choice" in lesson.text
+    assert "data-lesson-url" in lesson.text
+    assert "I’m here to help with" not in lesson.text
+
+    revisited = client.get("/learners/opener-learner")
+    assert "I’m here to help with Equal halves." in revisited.text

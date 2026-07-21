@@ -357,3 +357,45 @@ def test_assumed_skills_are_saved_with_the_adopted_curriculum(
     version = adopted.progress.curriculum_version
     assert store.assumed_skill_codes(version) == frozenset({"parts"})
     assert store.assumed_skill_codes("unknown-version") == frozenset()
+
+
+def test_recent_lesson_exchanges_group_episodes_in_order(tmp_path: Path) -> None:
+    from mali_app.store_types import TeachingTrace
+
+    store = _store(str(tmp_path / "exchanges.db"))
+    learner = learner_id("chat-learner")
+    _register_with_curriculum(store, learner, "Ada")
+    skill = skill_code("parts")
+
+    def _trace(episode: str, transcript: str, student: str, outcome: str) -> None:
+        store.record_teaching_trace(
+            TeachingTrace(
+                learner,
+                skill,
+                episode,
+                "fixture:instructor",
+                "instructor_v1",
+                "v2",
+                transcript,
+                student,
+                0,
+                0,
+                outcome,
+            )
+        )
+
+    _trace("episode-1", "What is a half? ", "what is a half", "continued")
+    _trace("episode-1", "Try 8 first.", "what is a half", "completed")
+    _trace("episode-2", "Exactly - 4 works.", "4", "completed")
+    _trace("episode-3", "Now try 10.", "ok", "completed")
+
+    exchanges = store.recent_lesson_exchanges(learner, skill, 2)
+
+    assert [exchange.student_text for exchange in exchanges] == ["4", "ok"]
+    assert exchanges[0].tutor_text == "Exactly - 4 works."
+
+    all_three = store.recent_lesson_exchanges(learner, skill, 4)
+    assert all_three[0].tutor_text == "What is a half? Try 8 first."
+    assert all_three[0].student_text == "what is a half"
+    with pytest.raises(ValueError):
+        store.recent_lesson_exchanges(learner, skill, 0)

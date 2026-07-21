@@ -335,3 +335,41 @@ def _learner_state(database: str, learner: str) -> tuple[int, str | None, int]:
         connection.close()
     assert row is not None
     return row
+
+
+def test_second_episode_continues_the_recorded_conversation(tmp_path: Path) -> None:
+    database = str(tmp_path / "continuity.db")
+    gateway = ScriptedInstructorGateway(
+        [
+            (
+                StreamDelta(
+                    text=(
+                        "A half is one of two equal parts. In 8, what would one "
+                        "half be?"
+                    )
+                ),
+            ),
+            (StreamDelta(text="Exactly - 4 is one half of 8. Now try 10."),),
+        ]
+    )
+    client = TestClient(
+        create_app(database, enable_instructor=True, model_gateway=gateway)
+    )
+    _place_and_target(client, database, "memory-learner")
+
+    first = client.post(
+        "/v1/learners/memory-learner/lesson",
+        json={"student_turn": "what is a half"},
+    )
+    assert first.status_code == 200
+    assert "<recent-conversation>\nnone" in gateway.requests[0].input
+
+    second = client.post(
+        "/v1/learners/memory-learner/lesson", json={"student_turn": "4"}
+    )
+    assert second.status_code == 200
+    followup = gateway.requests[1].input
+    assert "<recent-conversation>" in followup
+    assert "student: what is a half" in followup
+    assert "In 8, what would one half be?" in followup
+    assert "<untrusted-student-turn>\n4\n" in followup

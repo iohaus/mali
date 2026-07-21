@@ -196,6 +196,12 @@ _MIGRATIONS: tuple[tuple[str, ...], ...] = (
         """,
     ),
     ("ALTER TABLE skill ADD COLUMN assumed INTEGER NOT NULL DEFAULT 0",),
+    (
+        """
+        ALTER TABLE teaching_trace
+        ADD COLUMN student_turn TEXT NOT NULL DEFAULT ''
+        """,
+    ),
 )
 
 

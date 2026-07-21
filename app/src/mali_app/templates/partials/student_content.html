@@ -63,7 +63,9 @@
     </div>
 
     <div id="lesson-messages" class="lesson-messages" aria-live="polite">
+      {% if not lesson_url %}
       <article class="message tutor-message" data-markdown>{% if target_title %}I’m here to help with {{ target_title }}.{% else %}I’m here when you are ready for the next step.{% endif %}</article>
+      {% endif %}
       {% if feedback %}
       <article class="message tutor-message" data-markdown>{{ feedback }}</article>
       {% endif %}

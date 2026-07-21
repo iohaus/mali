@@ -45,7 +45,7 @@ from mali.templates import (
     QuestionInstance,
     QuestionTemplate,
 )
-from mali.views import ClosedMistake, progress_map
+from mali.views import ClosedMistake, LessonExchange, progress_map
 
 from mali_app.clock import Clock, SystemClock, as_storage_time
 from mali_app.fresh import FreshSource, SystemFreshSource
@@ -65,6 +65,10 @@ from mali_app.store_types import (
 )
 
 _MAX_EXECUTION_ATTEMPTS = 2
+# A lesson episode writes at most one trace row per model turn; the flow
+# budget caps turns well below this, so the window always covers `limit`
+# whole episodes.
+_MAX_TRACE_ROWS_PER_EPISODE = 12
 _LOG = logging.getLogger(__name__)
 
 
@@ -562,9 +566,9 @@ class SQLiteRecordStore:
                 """
                 INSERT INTO teaching_trace
                     (id, learner, skill, episode_id, model, prompt_version,
-                     policy_version, transcript, tokens_in, tokens_out,
-                     episode_outcome, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     policy_version, transcript, student_turn, tokens_in,
+                     tokens_out, episode_outcome, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     f"trace-{uuid4().hex}",
@@ -575,6 +579,7 @@ class SQLiteRecordStore:
                     trace.prompt_version,
                     trace.policy_version,
                     trace.transcript,
+                    trace.student_turn,
                     trace.tokens_in,
                     trace.tokens_out,
                     trace.episode_outcome,
@@ -596,6 +601,48 @@ class SQLiteRecordStore:
             raise StoreError("could not save teaching trace") from error
         finally:
             connection.close()
+
+    def recent_lesson_exchanges(
+        self, learner: LearnerId, skill: SkillCode, limit: int
+    ) -> tuple[LessonExchange, ...]:
+        """Load the last lesson exchanges so a conversation can continue.
+
+        One exchange per episode: the student's message paired with the
+        episode's spoken tutor text (turn transcripts concatenated in order).
+        Time and space are O(limit) episodes; rows are bounded by the flow
+        budget, so no pagination is needed.
+        """
+        if type(limit) is not int or limit < 1:
+            raise ValueError("lesson exchange limit must be a positive integer")
+        row_window = limit * _MAX_TRACE_ROWS_PER_EPISODE
+        connection = self._connection()
+        try:
+            rows = connection.execute(
+                """
+                SELECT episode_id, student_turn, transcript
+                FROM teaching_trace
+                WHERE learner = ? AND skill = ? AND episode_id <> ''
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT ?
+                """,
+                (learner, skill, row_window),
+            ).fetchall()
+        except sqlite3.DatabaseError as error:
+            raise StoreError("could not read the recent lesson turns") from error
+        finally:
+            connection.close()
+        by_episode: dict[str, tuple[str, list[str]]] = {}
+        order: list[str] = []
+        for row in reversed(rows):
+            episode = _text(row["episode_id"])
+            if episode not in by_episode:
+                by_episode[episode] = (_text(row["student_turn"]), [])
+                order.append(episode)
+            by_episode[episode][1].append(_text(row["transcript"]))
+        return tuple(
+            LessonExchange(student, "".join(parts))
+            for student, parts in (by_episode[episode] for episode in order)
+        )[-limit:]
 
     def teacher_dashboard(self) -> tuple[TeacherLearnerSummary, ...]:
         """Read concise learner summaries for the teacher dashboard."""

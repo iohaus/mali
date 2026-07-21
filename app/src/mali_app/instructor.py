@@ -14,7 +14,7 @@ from mali.errors import InvalidIdentifier
 from mali.ids import LearnerId, SkillCode, skill_code
 from mali.rules import RefusalReason
 from mali.snapshot import Snapshot
-from mali.views import InstructorContextPack, instructor_context
+from mali.views import InstructorContextPack, LessonExchange, instructor_context
 
 from mali_app.degradation import DegradationController, DegradationLevel
 from mali_app.model_gateway import (
@@ -28,6 +28,8 @@ from mali_app.prompt_assets import instructor_prompt, render_instructor_context
 from mali_app.store_types import ExecutionStatus, TeachingTrace
 
 _LOG = logging.getLogger(__name__)
+_RECENT_EXCHANGE_LIMIT = 4
+_MAX_EXCHANGE_SIDE_CHARS = 600
 
 
 class InstructorOutcome(StrEnum):
@@ -125,6 +127,7 @@ class InstructorEpisode:
                 0,
                 0,
                 InstructorOutcome.COMPLETED,
+                student_turn=student_turn,
             )
             _LOG.info(
                 "instructor episode completed learner=%s episode=%s mode=static",
@@ -155,6 +158,7 @@ class InstructorEpisode:
                     0,
                     0,
                     InstructorOutcome.BUDGET_EXHAUSTED,
+                    student_turn=student_turn,
                 )
                 _LOG.info(
                     "instructor episode budget exhausted learner=%s episode=%s "
@@ -212,6 +216,7 @@ class InstructorEpisode:
                     0,
                     output_limit,
                     InstructorOutcome.GATEWAY_FAILED,
+                    student_turn=student_turn,
                 )
                 _LOG.warning(
                     "instructor gateway failed learner=%s episode=%s; "
@@ -236,6 +241,7 @@ class InstructorEpisode:
                 0,
                 output_limit,
                 InstructorOutcome.COMPLETED if terminal else "continued",
+                student_turn=student_turn,
             )
             if terminal:
                 _LOG.info(
@@ -260,6 +266,8 @@ class InstructorEpisode:
         tokens_in: int,
         tokens_out: int,
         outcome: InstructorOutcome | str,
+        *,
+        student_turn: str,
     ) -> None:
         target = snapshot.progress.target
         if target is None:
@@ -273,6 +281,7 @@ class InstructorEpisode:
                 snapshot.policy.instructor_prompt_version,
                 snapshot.policy.version,
                 transcript,
+                student_turn,
                 tokens_in,
                 tokens_out,
                 outcome.value if isinstance(outcome, InstructorOutcome) else outcome,
@@ -414,7 +423,27 @@ def _context_for(
         student_turn,
         recent_mistake_limit=snapshot.policy.flow_budget.recent_mistake_limit,
         prerequisite_path=prerequisite_path,
+        recent_conversation=_bounded_conversation(
+            store.recent_lesson_exchanges(learner, target, _RECENT_EXCHANGE_LIMIT)
+        ),
     )
+
+
+def _bounded_conversation(
+    exchanges: tuple[LessonExchange, ...],
+) -> tuple[LessonExchange, ...]:
+    """Keep the conversation window small enough for every model budget."""
+    return tuple(
+        LessonExchange(_tail(exchange.student_text), _tail(exchange.tutor_text))
+        for exchange in exchanges
+    )
+
+
+def _tail(text: str) -> str:
+    """Keep the end of a long turn: it holds the still-open question."""
+    if len(text) <= _MAX_EXCHANGE_SIDE_CHARS:
+        return text
+    return "…" + text[-_MAX_EXCHANGE_SIDE_CHARS:]
 
 
 def _arguments(raw_arguments: str | None) -> dict[str, object] | None:

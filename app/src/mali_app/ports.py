@@ -5,7 +5,7 @@ from typing import Protocol
 from mali.actions import Action, Actor
 from mali.ids import LearnerId, SkillCode
 from mali.snapshot import Snapshot
-from mali.views import ClosedMistake
+from mali.views import ClosedMistake, LessonExchange
 
 from mali_app.store_types import AuditResult, ExecutionResult, TeachingTrace
 
@@ -31,3 +31,7 @@ class RecordStore(Protocol):
     ) -> tuple[ClosedMistake, ...]: ...
 
     def record_teaching_trace(self, trace: TeachingTrace) -> None: ...
+
+    def recent_lesson_exchanges(
+        self, learner: LearnerId, skill: SkillCode, limit: int
+    ) -> tuple[LessonExchange, ...]: ...

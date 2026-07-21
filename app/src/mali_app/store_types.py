@@ -60,6 +60,7 @@ class TeachingTrace:
     prompt_version: str
     policy_version: str
     transcript: str
+    student_turn: str
     tokens_in: int
     tokens_out: int
     episode_outcome: str

@@ -63,6 +63,14 @@ class InstructorMistake:
 
 
 @dataclass(frozen=True, slots=True)
+class LessonExchange:
+    """One prior lesson exchange retained so a conversation stays coherent."""
+
+    student_text: str
+    tutor_text: str
+
+
+@dataclass(frozen=True, slots=True)
 class InstructorContextPack:
     """The complete safe record projection for one teaching turn."""
 
@@ -72,6 +80,7 @@ class InstructorContextPack:
     recent_mistakes: tuple[InstructorMistake, ...]
     student_turn: str
     prerequisite_path: tuple[str, ...]
+    recent_conversation: tuple[LessonExchange, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +136,7 @@ def instructor_context(
     *,
     recent_mistake_limit: int,
     prerequisite_path: tuple[SkillCode, ...] = (),
+    recent_conversation: tuple[LessonExchange, ...] = (),
 ) -> InstructorContextPack:
     """Project progress into model-safe teaching context without checkpoint data."""
     if progress.target is None:
@@ -135,6 +145,8 @@ def instructor_context(
         raise ValueError("recent mistake limit must be a positive integer")
     if type(student_turn) is not str:
         raise ValueError("student turn must be text")
+    if any(type(exchange) is not LessonExchange for exchange in recent_conversation):
+        raise ValueError("recent conversation must hold lesson exchanges")
     target = _skill(progress.curriculum, progress.target)
     matching_mistakes = tuple(
         InstructorMistake(
@@ -158,6 +170,7 @@ def instructor_context(
         matching_mistakes,
         student_turn,
         tuple(_skill(progress.curriculum, code).title for code in prerequisite_path),
+        recent_conversation,
     )
 
 
